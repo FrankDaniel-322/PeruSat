@@ -9,6 +9,7 @@ import { getSupabaseClient } from '../supabase/supabaseClient';
 import { SupabaseMissionGateway } from '../supabase/SupabaseMissionGateway';
 import { soundManager } from './audio/SoundManager';
 import { RoomLobbyModal } from './lobby/RoomLobbyModal';
+import { MainMenu } from './menu/MainMenu';
 import { FinalMissionReport } from './report/FinalMissionReport';
 import { StationCanvas } from './station/StationCanvas';
 
@@ -24,7 +25,8 @@ const connectionNames: Record<ConnectionState, string> = {
 export const PeruSatGameApp: React.FC = () => {
   const [role, setRole] = useState<PlayerRole>('ground');
   const [scenarioMode, setScenarioMode] = useState<'routine' | 'emergency'>('routine');
-  const [activeTab, setActiveTab] = useState<'game' | 'report' | 'briefing'>('game');
+  const [activeTab, setActiveTab] = useState<'menu' | 'game' | 'report' | 'briefing'>('menu');
+  const [initialSceneMode, setInitialSceneMode] = useState<'cabin' | 'explorable'>('cabin');
   const [soundMuted, setSoundMuted] = useState(false);
 
   // Estado Multijugador / Salas
@@ -160,25 +162,39 @@ export const PeruSatGameApp: React.FC = () => {
       {/* Barra de Navegación Superior */}
       <header className="bg-slate-900 border-b border-cyan-900/60 px-4 py-3 flex flex-wrap items-center justify-between gap-3 sticky top-0 z-30 shadow-lg">
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <span className="text-xl">🛰️</span>
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              setActiveTab('menu');
+            }}
+            className="flex items-center gap-2 text-left group"
+            title="Volver al Menú Principal"
+          >
+            <span className="text-xl group-hover:scale-110 transition-transform">🛰️</span>
             <div>
-              <h1 className="text-sm md:text-base font-black tracking-tight text-cyan-400">
+              <h1 className="text-sm md:text-base font-black tracking-tight text-cyan-400 group-hover:text-cyan-300">
                 PERUSAT CREW · Operación El Niño
               </h1>
               <p className="text-[10px] text-slate-400 font-mono">
                 Simulador Cooperativo · Misión A (Inundaciones en Piura)
               </p>
             </div>
-          </div>
-
-          <span className="hidden sm:inline-block text-[10px] font-mono font-bold bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded">
-            schemaVersion: 3
-          </span>
+          </button>
         </div>
 
         {/* Pestañas de Vista */}
         <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs font-semibold">
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              setActiveTab('menu');
+            }}
+            className={`px-3 py-1 rounded transition-colors ${
+              activeTab === 'menu' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            🏠 Menú
+          </button>
           <button
             onClick={() => {
               soundManager.playClick();
@@ -317,6 +333,26 @@ export const PeruSatGameApp: React.FC = () => {
 
       {/* Contenido Principal según Pestaña */}
       <main className="max-w-5xl mx-auto p-3 md:p-4 space-y-4">
+        {activeTab === 'menu' && (
+          <MainMenu
+            onStartLocalMission={(selectedRole, selectedScenario) => {
+              setRole(selectedRole);
+              setScenarioMode(selectedScenario);
+              if ('setScenario' in activeGateway && typeof (activeGateway as any).setScenario === 'function') {
+                (activeGateway as any).setScenario(currentRoomId, selectedScenario === 'emergency' ? 'A2' : 'A1');
+              }
+              setInitialSceneMode('cabin');
+              setActiveTab('game');
+            }}
+            onOpenMultiplayer={() => setIsLobbyOpen(true)}
+            onOpenBriefing={() => setActiveTab('briefing')}
+            onOpenExplorableWorld={() => {
+              setInitialSceneMode('explorable');
+              setActiveTab('game');
+            }}
+          />
+        )}
+
         {activeTab === 'game' &&
           (!snapshot ? (
             <div className="bg-slate-900 border border-cyan-800/80 rounded-2xl p-8 text-center text-slate-100 max-w-lg mx-auto my-12 space-y-4 shadow-2xl">
@@ -359,6 +395,9 @@ export const PeruSatGameApp: React.FC = () => {
               role={role}
               gateway={activeGateway}
               scenarioMode={scenarioMode}
+              onRoleChange={(newRole) => setRole(newRole)}
+              isMultiplayer={isMultiplayer}
+              initialSceneMode={initialSceneMode}
             />
           ))}
 
@@ -454,6 +493,9 @@ export const PeruSatGameApp: React.FC = () => {
         </p>
         <p className="text-[11px]">
           Simulación didáctica basada en referencias de CONIDA / PerúSAT-1 y NASA GPM/IMERG. No constituye un servicio real de alerta temprana.
+        </p>
+        <p className="text-[10px] text-slate-600 pt-1 font-mono">
+          <span>Acceso jurado / evaluador: Pulsa <kbd className="bg-slate-900 border border-slate-800 px-1 py-0.5 rounded text-slate-400">Ctrl+Shift+D</kbd> o añade <code className="text-cyan-600">?dev=true</code> para abrir DevTools y arnés técnico.</span>
         </p>
       </footer>
     </div>

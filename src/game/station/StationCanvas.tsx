@@ -16,6 +16,9 @@ interface StationCanvasProps {
   gateway: MissionGateway & { getAppliedEvents?: (roomId: string) => AppliedEvent[] };
   onActionSent?: (action: MissionAction) => void;
   scenarioMode?: 'routine' | 'emergency';
+  onRoleChange?: (newRole: PlayerRole) => void;
+  isMultiplayer?: boolean;
+  initialSceneMode?: 'cabin' | 'explorable';
 }
 
 interface CameraProfile {
@@ -71,9 +74,15 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
   gateway,
   onActionSent,
   scenarioMode = 'routine',
+  onRoleChange,
+  isMultiplayer = false,
+  initialSceneMode = 'cabin',
 }) => {
   // Modal de consola activa ('base' | 'camera' | 'antenna' | 'report' | null)
   const [activeModal, setActiveModal] = useState<StationId | null>(null);
+
+  // Modo de visualización: Cabina clásica pixel art o Mundo Explorable 2D con WASD
+  const [sceneMode, setSceneMode] = useState<'cabin' | 'explorable'>(initialSceneMode);
 
   // Panel desplegable para los 6 pasos y bitácora
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
@@ -90,7 +99,8 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
   const [selectedTarget, setSelectedTarget] = useState<'rio-piura' | 'rio-chira'>('rio-piura');
   const [selectedProfile, setSelectedProfile] = useState<'compressed' | 'standard' | 'detailed'>('standard');
   const [aimValue, setAimValue] = useState<number>(66);
-  const [radioFreq, setRadioFreq] = useState<number>(116);
+  // Frecuencia satelital Banda X: 8.20 GHz (realista para bajada de imágenes de alta resolución)
+  const [radioFreq, setRadioFreq] = useState<number>(8.2);
   const [selectedFinding, setSelectedFinding] = useState<Finding>('possible_flood');
   const [actionError, setActionError] = useState<string | null>(null);
   const [eventLogs, setEventLogs] = useState<string[]>([
@@ -177,7 +187,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     }
     if (snapshot.phase === 'downlink') {
       return role === 'satellite'
-        ? 'Sintoniza a 116 MHz y descarga la imagen.'
+        ? 'Sintoniza a 8.2 GHz (Banda X) y descarga la imagen.'
         : 'Esperando bajada de telemetría a Punta Hermosa.';
     }
     if (snapshot.phase === 'review') {
@@ -202,6 +212,104 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     (snapshot.phase === 'review' && scenarioMode === 'emergency') ||
     snapshot.resources.energyWh < 15 ||
     snapshot.resources.contactSeconds < 20;
+
+  // Información didáctica de la tarea activa y el operador responsable
+  const getRequiredStepInfo = () => {
+    switch (snapshot.phase) {
+      case 'briefing':
+        return {
+          actorRole: 'ground' as PlayerRole,
+          stationId: 'base' as StationId,
+          title: 'Elegir Provincia y Río',
+          description: 'La Base CNOIS debe seleccionar el río prioritario y solicitar observación al satélite.',
+        };
+      case 'planning':
+        return {
+          actorRole: 'satellite' as PlayerRole,
+          stationId: 'camera' as StationId,
+          title: 'Configurar Sensor NAOMI',
+          description: 'El Satélite PerúSAT-1 debe calibrar la resolución y balancear tiempo de enlace vs detalle.',
+        };
+      case 'capture': {
+        const hasPending = snapshot.observations.some((o) => !o.transmitted);
+        if (!hasPending) {
+          return {
+            actorRole: 'satellite' as PlayerRole,
+            stationId: 'camera' as StationId,
+            title: 'Disparar Cámara NAOMI',
+            description: 'El Satélite PerúSAT-1 debe alinear la mira óptica y capturar la imagen de la cuenca.',
+          };
+        }
+        const activeObs = snapshot.observations.find((o) => !o.transmitted);
+        if (activeObs && !activeObs.requested) {
+          return {
+            actorRole: 'ground' as PlayerRole,
+            stationId: 'antenna' as StationId,
+            title: 'Autorizar Telemetría',
+            description: 'La Base CNOIS debe autorizar la bajada de telemetría hacia Punta Hermosa.',
+          };
+        }
+        return {
+          actorRole: 'satellite' as PlayerRole,
+          stationId: 'antenna' as StationId,
+          title: 'Transmitir Banda X (8.2 GHz)',
+          description: 'El Satélite PerúSAT-1 debe transmitir los datos por antena Banda X a 4 Mb/s.',
+        };
+      }
+      case 'downlink': {
+        const activeObs = snapshot.observations.find((o) => !o.transmitted);
+        if (activeObs && !activeObs.requested) {
+          return {
+            actorRole: 'ground' as PlayerRole,
+            stationId: 'antenna' as StationId,
+            title: 'Autorizar Telemetría',
+            description: 'La Base CNOIS debe autorizar la bajada de telemetría hacia Punta Hermosa.',
+          };
+        }
+        return {
+          actorRole: 'satellite' as PlayerRole,
+          stationId: 'antenna' as StationId,
+          title: 'Transmitir Banda X (8.2 GHz)',
+          description: 'El Satélite PerúSAT-1 debe transmitir los datos por antena Banda X a 4 Mb/s.',
+        };
+      }
+      case 'review': {
+        const hasUnclassified = snapshot.observations.some((o) => o.transmitted && !o.finding);
+        if (hasUnclassified) {
+          return {
+            actorRole: 'ground' as PlayerRole,
+            stationId: 'report' as StationId,
+            title: 'Clasificar Imagen Científica',
+            description: 'La Base CNOIS debe analizar la evidencia óptica recibida y registrar el hallazgo.',
+          };
+        }
+        const validCount = snapshot.observations.filter(isEvidence).length;
+        const reqCount = scenarioMode === 'emergency' ? 1 : 2;
+        if (validCount < reqCount) {
+          return {
+            actorRole: 'ground' as PlayerRole,
+            stationId: 'base' as StationId,
+            title: 'Solicitar 2da Cuenca (Río Chira)',
+            description: 'El protocolo exige corroborar al menos 2 cuencas antes de emitir el informe final.',
+          };
+        }
+        return {
+          actorRole: 'ground' as PlayerRole,
+          stationId: 'report' as StationId,
+          title: 'Emitir Informe Oficial ante COEN',
+          description: 'La Base CNOIS puede consolidar y remitir el informe oficial de situación simulado.',
+        };
+      }
+      case 'debrief':
+        return {
+          actorRole: 'ground' as PlayerRole,
+          stationId: 'report' as StationId,
+          title: 'Ver Informe Final y Rúbrica',
+          description: 'Misión concluida con éxito. Revisa el balance ético, técnico y la evaluación.',
+        };
+    }
+  };
+  const stepInfo = getRequiredStepInfo();
 
   // Acciones hacia el gateway con protección de doble clic e idempotencia
   const handleDispatch = async (
@@ -509,10 +617,83 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
         </button>
       </div>
 
-      {/* 2. Escenario Principal: Cabina Phaser Limpia (Pixel Art sin textos superpuestos) */}
+      {/* Selector de Modo de Visualización y Banner de Tarea Activa */}
+      <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/80 p-1.5 rounded-lg border border-slate-800 text-xs font-mono">
+        <div className="flex items-center gap-1.5">
+          <span className="text-slate-400 font-bold">Vista:</span>
+          <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800">
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setSceneMode('cabin');
+              }}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                sceneMode === 'cabin'
+                  ? 'bg-cyan-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Vista pixel art clásica con todas las consolas en pantalla (Original UX/UI)"
+            >
+              🕹️ Cabina Vintage
+            </button>
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setSceneMode('explorable');
+              }}
+              className={`px-2.5 py-1 rounded text-xs font-bold transition-all ${
+                sceneMode === 'explorable'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+              title="Mundo interactivo 2D: Camina con WASD entre 2 salas y pulsa [E] para operar"
+            >
+              🚶 Mundo Explorable 2D (2 Salas)
+            </button>
+          </div>
+        </div>
+
+        {/* Indicador de siguiente estación recomendada */}
+        <div className="flex items-center gap-1 text-[11px] text-slate-300">
+          <span className="text-cyan-400 font-bold">Próxima Consola:</span>
+          <span className="px-1.5 py-0.5 rounded bg-cyan-950/80 border border-cyan-800 text-cyan-300 font-bold">
+            {stepInfo.title}
+          </span>
+        </div>
+      </div>
+
+      {/* Banner de Ayuda Didáctica y Cambio Rápido de Rol en Modo Local */}
+      {!isMultiplayer && role !== stepInfo.actorRole && (
+        <div className="bg-amber-950/90 border-2 border-amber-400 p-2.5 rounded-xl flex flex-wrap items-center justify-between gap-3 text-xs font-mono shadow-xl animate-pulse">
+          <div className="flex items-center gap-2">
+            <span className="text-lg">⚠️</span>
+            <div>
+              <div className="font-bold text-amber-300 flex items-center gap-1.5">
+                <span>Turno requerido:</span>
+                <span className="px-1.5 py-0.2 rounded bg-amber-900/80 text-amber-200 border border-amber-600">
+                  {stepInfo.actorRole === 'ground' ? '📡 Base CNOIS (Tierra)' : '🛰️ Satélite PerúSAT-1 (Órbita)'}
+                </span>
+              </div>
+              <p className="text-slate-300 text-[11px] mt-0.5">{stepInfo.description}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              onRoleChange?.(stepInfo.actorRole);
+            }}
+            className="px-3.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold rounded-lg shadow-md transition-all transform active:scale-95 whitespace-nowrap ml-auto"
+            title={`Cambiar control a ${stepInfo.actorRole === 'ground' ? 'Base CNOIS' : 'PerúSAT-1'}`}
+          >
+            🔄 Cambiar a {stepInfo.actorRole === 'ground' ? 'Base CNOIS' : 'PerúSAT-1'} (1 Clic)
+          </button>
+        </div>
+      )}
+
+      {/* 2. Escenario Principal: Cabina Phaser o Mundo Explorable */}
       <div className="cabin-frame relative rounded-lg border-2 border-blue-900/80 overflow-hidden shadow-2xl">
         {/* Escena interactiva Phaser 4 */}
-        <PhaserGame />
+        <PhaserGame sceneMode={sceneMode} />
 
         {/* Gato Guía Discreto: Instrucciones muy cortas en la parte inferior */}
         <div
@@ -602,22 +783,37 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex justify-end gap-2">
-                    <button
-                      onClick={handleRequestObservation}
-                      disabled={
-                        role !== 'ground' ||
-                        (snapshot.phase !== 'briefing' && snapshot.phase !== 'review') ||
-                        isDispatching
-                      }
-                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                    >
-                      {role === 'ground'
-                        ? (snapshot.observations.length > 0
-                            ? 'Enviar Solicitud de 2da Zona al Satélite →'
-                            : 'Enviar Solicitud al Satélite →')
-                        : 'Solo la Base puede solicitar'}
-                    </button>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {!isMultiplayer && role !== 'ground' && (
+                      <button
+                        onClick={() => {
+                          soundManager.playClick();
+                          onRoleChange?.('ground');
+                        }}
+                        className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs rounded shadow"
+                        title="Cambiar control a Base CNOIS"
+                      >
+                        🔄 Cambiar a Base CNOIS (1 Clic)
+                      </button>
+                    )}
+                    <div className="flex justify-end gap-2 ml-auto">
+                      <button
+                        onClick={handleRequestObservation}
+                        disabled={
+                          role !== 'ground' ||
+                          (snapshot.phase !== 'briefing' && snapshot.phase !== 'review') ||
+                          isDispatching
+                        }
+                        title={role !== 'ground' ? 'Solo la Base CNOIS puede solicitar observaciones' : 'Enviar solicitud al satélite'}
+                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                      >
+                        {role === 'ground'
+                          ? (snapshot.observations.length > 0
+                              ? 'Enviar Solicitud de 2da Zona al Satélite →'
+                              : 'Enviar Solicitud al Satélite →')
+                          : 'Solo la Base puede solicitar'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -663,14 +859,29 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                         })}
                       </div>
 
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={handleApprovePlan}
-                          disabled={role !== 'satellite' || snapshot.phase !== 'planning'}
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                        >
-                          {role === 'satellite' ? 'Aprobar Plan y Configurar Sensor →' : 'Solo Satélite aprueba'}
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {!isMultiplayer && role !== 'satellite' && (
+                          <button
+                            onClick={() => {
+                              soundManager.playClick();
+                              onRoleChange?.('satellite');
+                            }}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                            title="Cambiar control a Satélite PerúSAT-1"
+                          >
+                            🔄 Cambiar a Satélite (1 Clic)
+                          </button>
+                        )}
+                        <div className="flex justify-end gap-2 ml-auto">
+                          <button
+                            onClick={handleApprovePlan}
+                            disabled={role !== 'satellite' || snapshot.phase !== 'planning'}
+                            title={role !== 'satellite' ? 'Solo el Satélite puede aprobar el plan' : 'Aprobar plan'}
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            {role === 'satellite' ? 'Aprobar Plan y Configurar Sensor →' : 'Solo Satélite aprueba'}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   ) : (
@@ -703,18 +914,39 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                         )}
                       </div>
 
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={handleCaptureImage}
-                          disabled={
-                            role !== 'satellite' ||
-                            snapshot.phase !== 'capture' ||
-                            Math.abs(aimValue - 66) > 6
-                          }
-                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                        >
-                          Disparar Cámara NAOMI 📸
-                        </button>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        {!isMultiplayer && role !== 'satellite' && (
+                          <button
+                            onClick={() => {
+                              soundManager.playClick();
+                              onRoleChange?.('satellite');
+                            }}
+                            className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                            title="Cambiar control a Satélite PerúSAT-1"
+                          >
+                            🔄 Cambiar a Satélite (1 Clic)
+                          </button>
+                        )}
+                        <div className="flex justify-end gap-2 ml-auto">
+                          <button
+                            onClick={handleCaptureImage}
+                            disabled={
+                              role !== 'satellite' ||
+                              snapshot.phase !== 'capture' ||
+                              Math.abs(aimValue - 66) > 6
+                            }
+                            title={
+                              role !== 'satellite'
+                                ? 'Solo el Satélite puede operar la cámara NAOMI'
+                                : Math.abs(aimValue - 66) > 6
+                                ? 'Alinea la mira con la marca cian antes de disparar'
+                                : 'Disparar sensor óptico NAOMI'
+                            }
+                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            Disparar Cámara NAOMI 📸
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
@@ -724,11 +956,11 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
               {activeModal === 'antenna' && (
                 <div>
                   <div className="text-[11px] text-amber-400 font-bold uppercase tracking-wider">
-                    Terminal de Enlace · Banda X
+                    Terminal de Enlace · Banda X (8.20 GHz)
                   </div>
                   <h3>Transmisión de Datos a Tierra</h3>
                   <p className="text-xs text-slate-300 mb-3">
-                    Sintoniza la frecuencia a 116 MHz para iniciar la bajada de telemetría a Punta Hermosa.
+                    Sintoniza la frecuencia a 8.20 GHz (Banda X) para iniciar la bajada de telemetría hacia Punta Hermosa.
                   </p>
 
                   <div className="bg-slate-900 p-2.5 rounded border border-slate-800 font-mono text-xs space-y-1 mb-3">
@@ -751,67 +983,120 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Tasa de bajada:</span>
-                      <span className="text-amber-300">4.0 Mb/s (Banda X)</span>
+                      <span className="text-amber-300">4.0 Mb/s (Banda X satelital)</span>
                     </div>
                   </div>
 
                   <div className="space-y-1 mb-4 font-mono text-xs">
                     <label className="text-slate-300 flex justify-between">
-                      <span>Frecuencia:</span>
-                      <span className={radioFreq === 116 ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
-                        {radioFreq} MHz {radioFreq === 116 ? '✓ Sintonizada' : '(Ajusta a 116 MHz)'}
+                      <span>Frecuencia de Enlace:</span>
+                      <span className={Math.abs(radioFreq - 8.2) < 0.02 ? 'text-emerald-400 font-bold' : 'text-slate-400'}>
+                        {radioFreq.toFixed(2)} GHz {Math.abs(radioFreq - 8.2) < 0.02 ? '✓ Sintonizada' : '(Ajusta a 8.20 GHz)'}
                       </span>
                     </label>
                     <input
                       type="range"
-                      min="100"
-                      max="140"
+                      min="8.0"
+                      max="8.4"
+                      step="0.05"
                       value={radioFreq}
                       onChange={(e) => setRadioFreq(Number(e.target.value))}
                       className="w-full accent-amber-400"
                     />
                   </div>
 
-                  <div className="flex justify-end gap-2">
-                    {(() => {
-                      const activeObs =
-                        snapshot.observations.find((o) => !o.transmitted) ||
-                        snapshot.observations[snapshot.observations.length - 1];
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    {/* Botón de cambio de rol si el jugador local tiene el rol opuesto */}
+                    {!isMultiplayer && (
+                      <div>
+                        {(() => {
+                          const activeObs =
+                            snapshot.observations.find((o) => !o.transmitted) ||
+                            snapshot.observations[snapshot.observations.length - 1];
 
-                      if (activeObs && !activeObs.requested) {
+                          if (activeObs && !activeObs.requested && role !== 'ground') {
+                            return (
+                              <button
+                                onClick={() => {
+                                  soundManager.playClick();
+                                  onRoleChange?.('ground');
+                                }}
+                                className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs rounded shadow"
+                                title="Cambiar a Base CNOIS para solicitar la bajada"
+                              >
+                                🔄 Cambiar a Base CNOIS (1 Clic)
+                              </button>
+                            );
+                          }
+
+                          if (activeObs && activeObs.requested && !activeObs.transmitted && role !== 'satellite') {
+                            return (
+                              <button
+                                onClick={() => {
+                                  soundManager.playClick();
+                                  onRoleChange?.('satellite');
+                                }}
+                                className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                                title="Cambiar a Satélite PerúSAT-1 para transmitir el archivo"
+                              >
+                                🔄 Cambiar a Satélite (1 Clic)
+                              </button>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    )}
+
+                    <div className="flex justify-end gap-2 ml-auto">
+                      {(() => {
+                        const activeObs =
+                          snapshot.observations.find((o) => !o.transmitted) ||
+                          snapshot.observations[snapshot.observations.length - 1];
+
+                        if (activeObs && !activeObs.requested) {
+                          return (
+                            <button
+                              onClick={handleRequestTransmission}
+                              disabled={role !== 'ground' || isDispatching}
+                              title={role !== 'ground' ? 'Solo la Base CNOIS puede autorizar la descarga' : 'Autorizar descarga de telemetría'}
+                              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                            >
+                              {role === 'ground'
+                                ? 'Solicitar Telemetría (Base CNOIS) 📡'
+                                : 'Aguardando solicitud de la Base'}
+                            </button>
+                          );
+                        }
+
                         return (
                           <button
-                            onClick={handleRequestTransmission}
-                            disabled={role !== 'ground' || isDispatching}
-                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                            onClick={handleTransmitObservation}
+                            disabled={
+                              role !== 'satellite' ||
+                              Math.abs(radioFreq - 8.2) >= 0.02 ||
+                              !activeObs ||
+                              activeObs.transmitted ||
+                              isDispatching
+                            }
+                            title={
+                              role !== 'satellite'
+                                ? 'Solo el Satélite puede transmitir por antena'
+                                : Math.abs(radioFreq - 8.2) >= 0.02
+                                ? 'Ajusta la frecuencia a 8.20 GHz en Banda X antes de transmitir'
+                                : 'Transmitir telemetría por antena Banda X'
+                            }
+                            className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
                           >
-                            {role === 'ground'
-                              ? 'Solicitar Telemetría (Base CNOIS) 📡'
-                              : 'Aguardando solicitud de la Base'}
+                            {activeObs?.transmitted
+                              ? '✓ Telemetría Transmitida'
+                              : role === 'satellite'
+                              ? 'Transmitir por Antena Banda X 📡'
+                              : 'Aguardando enlace de Satélite'}
                           </button>
                         );
-                      }
-
-                      return (
-                        <button
-                          onClick={handleTransmitObservation}
-                          disabled={
-                            role !== 'satellite' ||
-                            radioFreq !== 116 ||
-                            !activeObs ||
-                            activeObs.transmitted ||
-                            isDispatching
-                          }
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                        >
-                          {activeObs?.transmitted
-                            ? '✓ Telemetría Transmitida'
-                            : role === 'satellite'
-                            ? 'Transmitir por Antena Banda X 📡'
-                            : 'Aguardando enlace de Satélite'}
-                        </button>
-                      );
-                    })()}
+                      })()}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1030,6 +1315,21 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
           </div>
         )}
       </div>
+
+      {/* Barra de Ayuda para Controles de Exploración 2D */}
+      {sceneMode === 'explorable' && (
+        <div className="bg-emerald-950/70 border border-emerald-700/60 rounded px-3 py-1.5 flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono text-emerald-300">
+          <div className="flex items-center gap-1.5">
+            <span className="text-sm">🎮</span>
+            <span>
+              <strong>Controles 2D:</strong> [W][A][S][D] o Flechas para moverte · Camina hacia las puertas laterales para cambiar de sala · Pulsa [E] o haz clic en consolas para operar.
+            </span>
+          </div>
+          <span className="text-emerald-400 font-bold bg-emerald-900/60 px-2 py-0.5 rounded">
+            Fase 1: Prototipo 2 Salas
+          </span>
+        </div>
+      )}
 
       {/* 3. Barra Inferior de Acción Inmediata (Limpia y Funcional) */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-900/90 px-3 py-2 rounded-lg border border-slate-800 text-xs font-mono">
