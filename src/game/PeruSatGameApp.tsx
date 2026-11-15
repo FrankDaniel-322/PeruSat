@@ -3,23 +3,39 @@ import type { Finding, PlayerRole } from '../contracts/mission';
 import { DevMissionGateway } from '../devtools/DevMissionGateway';
 import { useMissionGateway } from '../devtools/devState';
 import { soundManager } from './audio/SoundManager';
+import { RoomLobbyModal } from './lobby/RoomLobbyModal';
 import { FinalMissionReport } from './report/FinalMissionReport';
 import { StationCanvas } from './station/StationCanvas';
+import { SupabaseMissionGateway } from '../supabase/SupabaseMissionGateway';
+import { getSupabaseClient } from '../supabase/supabaseClient';
 
 export const PeruSatGameApp: React.FC = () => {
   const [role, setRole] = useState<PlayerRole>('ground');
   const [scenarioMode, setScenarioMode] = useState<'routine' | 'emergency'>('routine');
   const [activeTab, setActiveTab] = useState<'game' | 'report' | 'briefing'>('game');
   const [soundMuted, setSoundMuted] = useState(false);
-  const roomId = 'mision-piura-01';
 
-  // Gateway compartido para la sesión
-  const gateway = useMemo(() => {
-    const gw = new DevMissionGateway();
-    return gw;
-  }, []);
+  // Estado Multijugador / Salas
+  const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [currentRoomId, setCurrentRoomId] = useState('mision-piura-01');
+  const [roomJoinCode, setRoomJoinCode] = useState<string | null>(null);
+  const [authenticatedRole, setAuthenticatedRole] = useState<PlayerRole | null>(null);
+  const [isLobbyOpen, setIsLobbyOpen] = useState(false);
+  const [customCredentials, setCustomCredentials] = useState<{ url: string; anonKey: string } | null>(null);
 
-  const { snapshot, connectionState } = useMissionGateway(gateway, roomId);
+  // Instancias de Gateways
+  const devGateway = useMemo(() => new DevMissionGateway(), []);
+
+  const supabaseGateway = useMemo(() => {
+    const client = customCredentials
+      ? getSupabaseClient(customCredentials.url, customCredentials.anonKey)
+      : getSupabaseClient();
+    return client ? new SupabaseMissionGateway(client) : null;
+  }, [customCredentials]);
+
+  const activeGateway = isMultiplayer && supabaseGateway ? supabaseGateway : devGateway;
+
+  const { snapshot, connectionState } = useMissionGateway(activeGateway, currentRoomId);
 
   // Música y audio al primer clic
   const handleUserInteraction = () => {
@@ -31,9 +47,18 @@ export const PeruSatGameApp: React.FC = () => {
     setSoundMuted(isMute);
   };
 
+  const handleRoleSelect = (selectedRole: PlayerRole) => {
+    soundManager.playClick();
+    if (isMultiplayer && authenticatedRole) {
+      // En multijugador el rol proviene de la sala para evitar suplantaciones
+      return;
+    }
+    setRole(selectedRole);
+  };
+
   const handleResetMission = async () => {
     soundManager.playClick();
-    await gateway.dispatch(roomId, {
+    await activeGateway.dispatch(currentRoomId, {
       actionId: crypto.randomUUID(),
       actorRole: role,
       expectedRevision: snapshot.revision,
@@ -41,6 +66,26 @@ export const PeruSatGameApp: React.FC = () => {
       payload: { scenarioId: scenarioMode === 'emergency' ? 'A2' : 'A1' },
     });
     setActiveTab('game');
+  };
+
+  const handleRoomJoined = (roomId: string, assignedRole: PlayerRole, joinCode: string) => {
+    setIsMultiplayer(true);
+    setCurrentRoomId(roomId);
+    setAuthenticatedRole(assignedRole);
+    setRole(assignedRole);
+    setRoomJoinCode(joinCode);
+    setActiveTab('game');
+  };
+
+  const handleSwitchToLocal = () => {
+    setIsMultiplayer(false);
+    setCurrentRoomId('mision-piura-01');
+    setAuthenticatedRole(null);
+    setRoomJoinCode(null);
+  };
+
+  const handleConfigureSupabase = (url: string, anonKey: string) => {
+    setCustomCredentials({ url, anonKey });
   };
 
   const currentFinding: Finding = (snapshot.observations[0]?.quality === 'cloudy' || scenarioMode === 'emergency')
@@ -109,44 +154,75 @@ export const PeruSatGameApp: React.FC = () => {
           </button>
         </div>
 
-        {/* Selector de Rol y Escenario */}
+        {/* Selector de Rol, Modo de Red y Escenario */}
         <div className="flex items-center gap-2 text-xs">
-          {/* Conmutador de Rol */}
+          {/* Botón de Acceso al Lobby / Sala Multijugador */}
+          <button
+            onClick={() => {
+              soundManager.playClick();
+              setIsLobbyOpen(true);
+            }}
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded border text-xs font-semibold transition-all ${
+              isMultiplayer
+                ? 'bg-cyan-950/80 border-cyan-400 text-cyan-300 shadow-sm shadow-cyan-900/50'
+                : 'bg-slate-950 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
+            }`}
+            title="Abrir panel de sala y multijugador"
+          >
+            <span>{isMultiplayer ? '🌐' : '💻'}</span>
+            <span className="font-mono text-[11px]">
+              {isMultiplayer ? `Sala: ${roomJoinCode || currentRoomId.slice(0, 6)}` : 'Modo Local'}
+            </span>
+          </button>
+
+          {/* Conmutador de Rol (con bloqueo de seguridad en multijugador) */}
           <div className="flex items-center bg-slate-950 p-0.5 rounded border border-slate-800">
             <button
-              onClick={() => {
-                soundManager.playClick();
-                setRole('ground');
-              }}
-              className={`px-2 py-1 rounded font-bold ${
-                role === 'ground' ? 'bg-cyan-500 text-slate-950' : 'text-slate-400'
+              onClick={() => handleRoleSelect('ground')}
+              disabled={isMultiplayer && role !== 'ground'}
+              className={`px-2 py-1 rounded font-bold transition-all ${
+                role === 'ground'
+                  ? 'bg-cyan-500 text-slate-950'
+                  : isMultiplayer
+                  ? 'text-slate-600 opacity-40 cursor-not-allowed'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
+              title={isMultiplayer ? 'Rol asignado por la sala de Supabase' : 'Cambiar a Base CNOIS'}
             >
-              Base CNOIS
+              {isMultiplayer && role === 'ground' ? '🔒 Base CNOIS' : 'Base CNOIS'}
             </button>
             <button
-              onClick={() => {
-                soundManager.playClick();
-                setRole('satellite');
-              }}
-              className={`px-2 py-1 rounded font-bold ${
-                role === 'satellite' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'
+              onClick={() => handleRoleSelect('satellite')}
+              disabled={isMultiplayer && role !== 'satellite'}
+              className={`px-2 py-1 rounded font-bold transition-all ${
+                role === 'satellite'
+                  ? 'bg-amber-500 text-slate-950'
+                  : isMultiplayer
+                  ? 'text-slate-600 opacity-40 cursor-not-allowed'
+                  : 'text-slate-400 hover:text-slate-200'
               }`}
+              title={isMultiplayer ? 'Rol asignado por la sala de Supabase' : 'Cambiar a Satélite PerúSAT-1'}
             >
-              PerúSAT-1
+              {isMultiplayer && role === 'satellite' ? '🔒 PerúSAT-1' : 'PerúSAT-1'}
             </button>
           </div>
 
-          {/* Selector de Escenario */}
+          {/* Selector de Escenario (sólo editable en modo local) */}
           <select
             value={scenarioMode}
+            disabled={isMultiplayer}
             onChange={(e) => {
               soundManager.playClick();
               const mode = e.target.value as 'routine' | 'emergency';
               setScenarioMode(mode);
-              gateway.setScenario(roomId, mode === 'emergency' ? 'A2' : 'A1');
+              if ('setScenario' in activeGateway && typeof (activeGateway as any).setScenario === 'function') {
+                (activeGateway as any).setScenario(currentRoomId, mode === 'emergency' ? 'A2' : 'A1');
+              }
             }}
-            className="bg-slate-950 text-slate-300 border border-slate-700 rounded px-2 py-1 text-xs"
+            className={`bg-slate-950 text-slate-300 border border-slate-700 rounded px-2 py-1 text-xs ${
+              isMultiplayer ? 'opacity-60 cursor-not-allowed' : ''
+            }`}
+            title={isMultiplayer ? 'En multijugador el escenario se define al crear la sala' : 'Seleccionar escenario'}
           >
             <option value="routine">A1 · Rutinaria</option>
             <option value="emergency">A2 · Lluvias / Nubes</option>
@@ -163,8 +239,16 @@ export const PeruSatGameApp: React.FC = () => {
 
           {/* Estado de Enlace / Conexión */}
           <div className="hidden lg:flex items-center gap-1.5 font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
-            <span className={`w-1.5 h-1.5 rounded-full ${connectionState === 'connected' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span>{connectionState}</span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                connectionState === 'connected'
+                  ? 'bg-emerald-400 animate-pulse'
+                  : connectionState === 'reconnecting'
+                  ? 'bg-amber-400 animate-ping'
+                  : 'bg-rose-500'
+              }`}
+            />
+            <span className="capitalize">{connectionState}</span>
           </div>
         </div>
       </header>
@@ -175,7 +259,7 @@ export const PeruSatGameApp: React.FC = () => {
           <StationCanvas
             snapshot={snapshot}
             role={role}
-            gateway={gateway}
+            gateway={activeGateway}
             scenarioMode={scenarioMode}
           />
         )}
@@ -243,12 +327,27 @@ export const PeruSatGameApp: React.FC = () => {
           <FinalMissionReport
             snapshot={snapshot}
             finding={currentFinding}
-            appliedEvents={gateway.getAppliedEvents(snapshot.roomId)}
+            appliedEvents={activeGateway.getAppliedEvents ? activeGateway.getAppliedEvents(snapshot.roomId) : []}
             onReset={handleResetMission}
             onClose={() => setActiveTab('game')}
           />
         )}
       </main>
+
+      {/* Modal de Sala y Multijugador */}
+      <RoomLobbyModal
+        isOpen={isLobbyOpen}
+        onClose={() => setIsLobbyOpen(false)}
+        isMultiplayer={isMultiplayer}
+        currentRoomId={currentRoomId}
+        roomJoinCode={roomJoinCode}
+        assignedRole={authenticatedRole}
+        connectionState={connectionState}
+        supabaseGateway={supabaseGateway}
+        onSwitchToLocal={handleSwitchToLocal}
+        onRoomJoined={handleRoomJoined}
+        onConfigureSupabase={handleConfigureSupabase}
+      />
 
       {/* Pie de Página Ético e Informativo */}
       <footer className="border-t border-slate-900 py-6 px-4 text-center text-xs text-slate-500 space-y-1">

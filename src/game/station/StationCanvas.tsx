@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Finding, MissionAction, MissionSnapshot, PlayerRole } from '../../contracts/mission';
-import type { DevMissionGateway } from '../../devtools/DevMissionGateway';
+import type { MissionGateway } from '../../core/MissionGateway';
+import type { AppliedEvent } from '../../missions/flood/types';
 import { soundManager } from '../audio/SoundManager';
 import { missionBridge, type StationId } from '../../integration/missionBridge';
 import { PhaserGame } from '../../integration/PhaserGame';
@@ -10,7 +11,7 @@ import { FinalMissionReport } from '../report/FinalMissionReport';
 interface StationCanvasProps {
   snapshot: MissionSnapshot;
   role: PlayerRole;
-  gateway: DevMissionGateway;
+  gateway: MissionGateway & { getAppliedEvents?: (roomId: string) => AppliedEvent[] };
   onActionSent?: (action: MissionAction) => void;
   scenarioMode?: 'routine' | 'emergency';
 }
@@ -796,7 +797,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                       <FinalMissionReport
                         snapshot={snapshot}
                         finding={selectedFinding}
-                        appliedEvents={gateway.getAppliedEvents(snapshot.roomId)}
+                        appliedEvents={gateway.getAppliedEvents ? gateway.getAppliedEvents(snapshot.roomId) : []}
                       />
                     </div>
                   )}
