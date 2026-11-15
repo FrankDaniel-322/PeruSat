@@ -358,36 +358,63 @@ export class SupabaseMissionGateway implements MissionGateway {
   /**
    * Se une a una sala mediante el código de 6 caracteres.
    * La función join_room asigna automáticamente el rol disponible (ground o satellite).
+   * Incluye reintentos automáticos ante colisiones o bloqueos temporales de concurrencia.
    */
-  async joinRoomByCode(joinCode: string): Promise<{ roomId: string; role: PlayerRole; status: string }> {
-    await ensureAnonymousUser(this.client);
+  async joinRoomByCode(
+    joinCode: string,
+    maxRetries = 2
+  ): Promise<{ roomId: string; role: PlayerRole; status: string }> {
+    const code = joinCode.trim().toUpperCase();
+    let attempt = 0;
 
-    const { data, error } = await this.client.rpc('join_room', {
-      p_join_code: joinCode.trim().toUpperCase(),
-    });
+    while (attempt <= maxRetries) {
+      attempt++;
+      try {
+        await ensureAnonymousUser(this.client);
 
-    if (error) {
-      throw new MissionGatewayError(
-        'TRANSPORT_ERROR',
-        `Error al unirse a la sala: ${error.message}`
-      );
+        const { data, error } = await this.client.rpc('join_room', {
+          p_join_code: code,
+        });
+
+        if (error) {
+          if (attempt <= maxRetries) {
+            // Reintentar en caso de bloqueo transitorio o error de transporte
+            await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+            continue;
+          }
+          throw new MissionGatewayError(
+            'TRANSPORT_ERROR',
+            `Error al unirse a la sala: ${error.message}`
+          );
+        }
+
+        if (data.status === 'room_not_found') {
+          throw new MissionGatewayError('INVALID_ACTION', 'Código de sala no encontrado.');
+        }
+        if (data.status === 'room_full') {
+          throw new MissionGatewayError('INVALID_ACTION', 'La sala ya cuenta con sus 2 tripulantes.');
+        }
+        if (data.status !== 'joined' && data.status !== 'already_member') {
+          throw new MissionGatewayError('INVALID_ACTION', `No se pudo unir a la sala (${data.status}).`);
+        }
+
+        return {
+          roomId: data.roomId,
+          role: data.role as PlayerRole,
+          status: data.status,
+        };
+      } catch (err: unknown) {
+        if (err instanceof MissionGatewayError) throw err;
+        if (attempt <= maxRetries) {
+          await new Promise((resolve) => setTimeout(resolve, 150 * attempt));
+          continue;
+        }
+        const msg = err instanceof Error ? err.message : 'Error desconocido de transporte';
+        throw new MissionGatewayError('TRANSPORT_ERROR', msg);
+      }
     }
 
-    if (data.status === 'room_not_found') {
-      throw new MissionGatewayError('INVALID_ACTION', 'Código de sala no encontrado.');
-    }
-    if (data.status === 'room_full') {
-      throw new MissionGatewayError('INVALID_ACTION', 'La sala ya cuenta con sus 2 tripulantes.');
-    }
-    if (data.status !== 'joined' && data.status !== 'already_member') {
-      throw new MissionGatewayError('INVALID_ACTION', `No se pudo unir a la sala (${data.status}).`);
-    }
-
-    return {
-      roomId: data.roomId,
-      role: data.role as PlayerRole,
-      status: data.status,
-    };
+    throw new MissionGatewayError('TRANSPORT_ERROR', 'No se pudo unir a la sala tras múltiples reintentos.');
   }
 
   /**

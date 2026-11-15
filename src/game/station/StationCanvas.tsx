@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { Finding, MissionAction, MissionSnapshot, PlayerRole } from '../../contracts/mission';
 import type { MissionGateway } from '../../core/MissionGateway';
-import type { AppliedEvent } from '../../missions/flood/types';
+import { isEvidence } from '../../missions/flood/rules';
+import { SCENARIOS } from '../../missions/flood/config';
+import type { AppliedEvent, FloodSnapshot } from '../../missions/flood/types';
 import { soundManager } from '../audio/SoundManager';
 import { missionBridge, type StationId } from '../../integration/missionBridge';
 import { PhaserGame } from '../../integration/PhaserGame';
@@ -79,6 +81,10 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
   // Resumen breve de consecuencia tras una decisión
   const [consequence, setConsequence] = useState<ConsequenceToast | null>(null);
 
+  // Control de despacho seguro e idempotente
+  const lastActionIntentRef = useRef<{ action: MissionAction; error: boolean } | null>(null);
+  const [isDispatching, setIsDispatching] = useState(false);
+
   // Estados locales para tareas de consola
   const [selectedProvince, setSelectedProvince] = useState<'piura' | 'sullana'>('piura');
   const [selectedTarget, setSelectedTarget] = useState<'rio-piura' | 'rio-chira'>('rio-piura');
@@ -91,17 +97,38 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     '◈ Sistema inicializado. Monitoreo simulado en cuenca del Río Piura.',
   ]);
 
-  // Estación canónica según la fase
+  // Cálculos de estado y reglas según contrato de Misión A
+  const floodSnap = snapshot as FloodSnapshot;
+  const usefulEvidence = snapshot.observations.filter(isEvidence).length;
+  const scenarioDef = SCENARIOS[floodSnap.scenarioId ?? (scenarioMode === 'emergency' ? 'A2' : 'A1')];
+  const requiredEvidence = scenarioDef?.requiredValidEvidence ?? (scenarioMode === 'emergency' ? 1 : 2);
+  const hasPendingObservations = snapshot.observations.some((o) => !o.transmitted);
+  const hasUnclassifiedObservations = snapshot.observations.some((o) => o.transmitted && !o.finding);
+
+  // Si ya se observó Río Piura, sugerir por defecto Río Chira para la 2da observación
+  useEffect(() => {
+    if (snapshot.observations.some((o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio')) {
+      setSelectedProvince('sullana');
+      setSelectedTarget('rio-chira');
+    }
+  }, [snapshot.observations]);
+
+  // Estación canónica según la fase y estado de avance de la misión
   const getPhaseStation = (phase: MissionSnapshot['phase']): StationId => {
     switch (phase) {
       case 'briefing':
         return 'base';
       case 'planning':
-      case 'capture':
         return 'camera';
+      case 'capture':
+        return hasPendingObservations ? 'antenna' : 'camera';
       case 'downlink':
         return 'antenna';
       case 'review':
+        if (!hasUnclassifiedObservations && usefulEvidence < requiredEvidence) {
+          return 'base';
+        }
+        return 'report';
       case 'debrief':
         return 'report';
     }
@@ -141,6 +168,9 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
         : 'Satélite calcula energía y tiempo de pase.';
     }
     if (snapshot.phase === 'capture') {
+      if (hasPendingObservations) {
+        return 'Imagen en memoria de a bordo. Pasa a antena.';
+      }
       return role === 'satellite'
         ? 'Centra la mira en la marca cian y dispara.'
         : 'Satélite alineando sensor óptico NAOMI.';
@@ -151,10 +181,16 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
         : 'Esperando bajada de telemetría a Punta Hermosa.';
     }
     if (snapshot.phase === 'review') {
-      if (scenarioMode === 'emergency' || snapshot.observations[0]?.quality === 'cloudy') {
-        return '¡Nubes densas! Declara evidencia insuficiente.';
+      if (hasUnclassifiedObservations) {
+        if (scenarioMode === 'emergency' || snapshot.observations.some((o) => o.quality === 'cloudy')) {
+          return '¡Nubes densas! Declara evidencia insuficiente.';
+        }
+        return 'Analiza la imagen recibida antes del informe.';
       }
-      return 'Analiza la imagen recibida antes del informe.';
+      if (usefulEvidence < requiredEvidence) {
+        return '¡Falta corroboración! Solicita la 2da cuenca (Río Chira).';
+      }
+      return '¡Evidencias listas! Emite el informe de situación.';
     }
     if (snapshot.phase === 'debrief') {
       return 'Revisa el balance y el informe simulado.';
@@ -167,26 +203,50 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     snapshot.resources.energyWh < 15 ||
     snapshot.resources.contactSeconds < 20;
 
-  // Acciones hacia el gateway
+  // Acciones hacia el gateway con protección de doble clic e idempotencia
   const handleDispatch = async (
     action: MissionAction,
     successMessage: string,
     consequenceData?: ConsequenceToast,
   ) => {
+    if (isDispatching) return;
     setActionError(null);
+    setIsDispatching(true);
+
+    let actionToSend = action;
+    if (
+      lastActionIntentRef.current?.error &&
+      lastActionIntentRef.current.action.type === action.type &&
+      lastActionIntentRef.current.action.actorRole === action.actorRole
+    ) {
+      actionToSend = {
+        ...action,
+        actionId: lastActionIntentRef.current.action.actionId,
+        expectedRevision: snapshot.revision,
+      };
+    } else {
+      lastActionIntentRef.current = { action, error: false };
+    }
+
     try {
-      await gateway.dispatch(snapshot.roomId, action);
+      await gateway.dispatch(snapshot.roomId, actionToSend);
+      lastActionIntentRef.current = null;
       setEventLogs((prev) => [successMessage, ...prev.slice(0, 9)]);
       if (consequenceData) {
         setConsequence(consequenceData);
       }
-      onActionSent?.(action);
+      onActionSent?.(actionToSend);
       setActiveModal(null);
     } catch (err: unknown) {
+      if (lastActionIntentRef.current) {
+        lastActionIntentRef.current.error = true;
+      }
       const msg = err instanceof Error ? err.message : 'Error al despachar acción';
       setActionError(msg);
       soundManager.playAlert();
       missionBridge.requestGameInteraction({ kind: 'triggerAlertEffect' });
+    } finally {
+      setIsDispatching(false);
     }
   };
 
@@ -364,9 +424,9 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
   const missionPhases = [
     { label: 'Elegir provincia y río', completed: snapshot.phase !== 'briefing' },
     { label: 'Configurar resolución', completed: !['briefing', 'planning'].includes(snapshot.phase) },
-    { label: 'Realizar captura óptica', completed: !['briefing', 'planning', 'capture'].includes(snapshot.phase) },
-    { label: 'Transmitir por antena', completed: !['briefing', 'planning', 'capture', 'downlink'].includes(snapshot.phase) },
-    { label: 'Evaluar evidencia', completed: snapshot.phase === 'debrief' },
+    { label: 'Realizar captura óptica', completed: snapshot.observations.length > 0 },
+    { label: 'Transmitir por antena', completed: snapshot.observations.some((o) => o.transmitted) },
+    { label: 'Evaluar evidencia', completed: usefulEvidence >= requiredEvidence || snapshot.phase === 'debrief' },
     { label: 'Emitir informe simulado', completed: snapshot.phase === 'debrief' },
   ];
 
@@ -377,11 +437,13 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
       case 'planning':
         return 'Configurar Sensor Óptico';
       case 'capture':
-        return 'Disparar Sensor NAOMI';
+        return hasPendingObservations ? 'Transmitir por Antena' : 'Disparar Sensor NAOMI';
       case 'downlink':
         return 'Transmitir por Antena';
       case 'review':
-        return 'Evaluar Evidencia';
+        if (hasUnclassifiedObservations) return 'Clasificar Evidencia';
+        if (usefulEvidence < requiredEvidence) return 'Solicitar 2da Observación (Río Chira)';
+        return 'Emitir Informe Simulado';
       case 'debrief':
         return 'Ver Informe Simulado';
     }
@@ -499,7 +561,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                           : 'bg-slate-800 text-slate-300 border-slate-700'
                       }`}
                     >
-                      Provincia de Piura
+                      Provincia de Piura {snapshot.observations.some((o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio') ? '✓' : ''}
                     </button>
                     <button
                       onClick={() => {
@@ -512,7 +574,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                           : 'bg-slate-800 text-slate-300 border-slate-700'
                       }`}
                     >
-                      Provincia de Sullana
+                      Provincia de Sullana {snapshot.observations.some((o) => o.targetId === 'rio-chira' || o.targetId === 'piura-urbano') ? '✓' : ''}
                     </button>
                   </div>
 
@@ -543,10 +605,18 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                   <div className="flex justify-end gap-2">
                     <button
                       onClick={handleRequestObservation}
-                      disabled={role !== 'ground' || snapshot.phase !== 'briefing'}
+                      disabled={
+                        role !== 'ground' ||
+                        (snapshot.phase !== 'briefing' && snapshot.phase !== 'review') ||
+                        isDispatching
+                      }
                       className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
                     >
-                      {role === 'ground' ? 'Enviar Solicitud al Satélite →' : 'Solo la Base puede solicitar'}
+                      {role === 'ground'
+                        ? (snapshot.observations.length > 0
+                            ? 'Enviar Solicitud de 2da Zona al Satélite →'
+                            : 'Enviar Solicitud al Satélite →')
+                        : 'Solo la Base puede solicitar'}
                     </button>
                   </div>
                 </div>
@@ -664,11 +734,20 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                   <div className="bg-slate-900 p-2.5 rounded border border-slate-800 font-mono text-xs space-y-1 mb-3">
                     <div className="flex justify-between">
                       <span className="text-slate-400">Archivo:</span>
-                      <span className="text-cyan-300">{snapshot.observations[0]?.observationId ?? 'obs-01'}</span>
+                      <span className="text-cyan-300">
+                        {snapshot.observations.find((o) => !o.transmitted)?.observationId ??
+                          snapshot.observations[snapshot.observations.length - 1]?.observationId ??
+                          'obs-01'}
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Tamaño:</span>
-                      <span className="text-cyan-300">{snapshot.observations[0]?.sizeMb ?? 14} MB</span>
+                      <span className="text-cyan-300">
+                        {snapshot.observations.find((o) => !o.transmitted)?.sizeMb ??
+                          snapshot.observations[snapshot.observations.length - 1]?.sizeMb ??
+                          14}{' '}
+                        MB
+                      </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-400">Tasa de bajada:</span>
@@ -694,32 +773,45 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    {snapshot.observations.length > 0 && !snapshot.observations[snapshot.observations.length - 1]?.requested ? (
-                      <button
-                        onClick={handleRequestTransmission}
-                        disabled={role !== 'ground'}
-                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                      >
-                        {role === 'ground' ? 'Solicitar Telemetría (Base CNOIS) 📡' : 'Aguardando solicitud de la Base'}
-                      </button>
-                    ) : (
-                      <button
-                        onClick={handleTransmitObservation}
-                        disabled={
-                          role !== 'satellite' ||
-                          radioFreq !== 116 ||
-                          snapshot.observations.length === 0 ||
-                          snapshot.observations[snapshot.observations.length - 1]?.transmitted
-                        }
-                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                      >
-                        {snapshot.observations[snapshot.observations.length - 1]?.transmitted
-                          ? '✓ Telemetría Transmitida'
-                          : role === 'satellite'
-                          ? 'Transmitir por Antena Banda X 📡'
-                          : 'Aguardando enlace de Satélite'}
-                      </button>
-                    )}
+                    {(() => {
+                      const activeObs =
+                        snapshot.observations.find((o) => !o.transmitted) ||
+                        snapshot.observations[snapshot.observations.length - 1];
+
+                      if (activeObs && !activeObs.requested) {
+                        return (
+                          <button
+                            onClick={handleRequestTransmission}
+                            disabled={role !== 'ground' || isDispatching}
+                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            {role === 'ground'
+                              ? 'Solicitar Telemetría (Base CNOIS) 📡'
+                              : 'Aguardando solicitud de la Base'}
+                          </button>
+                        );
+                      }
+
+                      return (
+                        <button
+                          onClick={handleTransmitObservation}
+                          disabled={
+                            role !== 'satellite' ||
+                            radioFreq !== 116 ||
+                            !activeObs ||
+                            activeObs.transmitted ||
+                            isDispatching
+                          }
+                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                        >
+                          {activeObs?.transmitted
+                            ? '✓ Telemetría Transmitida'
+                            : role === 'satellite'
+                            ? 'Transmitir por Antena Banda X 📡'
+                            : 'Aguardando enlace de Satélite'}
+                        </button>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -741,56 +833,181 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                         Inspecciona la imagen satelital recibida y determina el hallazgo prudente.
                       </p>
 
-                      <div className="border border-slate-700 bg-slate-950 p-2 rounded mb-3 text-center">
-                        {scenarioMode === 'emergency' || snapshot.observations[0]?.quality === 'cloudy' ? (
-                          <div className="p-3 bg-slate-900 rounded border border-amber-800/60 font-mono text-xs text-amber-300">
-                            ☁️ COBERTURA NUBOSA DETECTADA (LIMITACIÓN ÓPTICA)
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              La nubosidad impide observar el cauce del río con el sensor óptico visible.
-                            </p>
-                          </div>
-                        ) : (
-                          <div className="p-3 bg-slate-900 rounded border border-emerald-800/60 font-mono text-xs text-emerald-300">
-                            🛰️ IMAGEN ÓPTICA VÁLIDA
-                            <p className="text-[11px] text-slate-400 mt-1">
-                              Cauce del río Piura visible con posible desborde en margen derecha.
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                      {hasUnclassifiedObservations ? (
+                        <>
+                          {(() => {
+                            const activeObs = snapshot.observations.find((o) => o.transmitted && !o.finding);
+                            const isCloudy = activeObs?.quality === 'cloudy';
+                            const targetName =
+                              activeObs?.targetId === 'rio-chira' || activeObs?.targetId === 'piura-urbano'
+                                ? 'Río Chira'
+                                : 'Río Piura';
+                            return (
+                              <div className="border border-slate-700 bg-slate-950 p-2 rounded mb-3 text-center">
+                                {isCloudy ? (
+                                  <div className="p-3 bg-slate-900 rounded border border-amber-800/60 font-mono text-xs text-amber-300">
+                                    ☁️ COBERTURA NUBOSA DETECTADA SOBRE {targetName.toUpperCase()} (LIMITACIÓN ÓPTICA)
+                                    <p className="text-[11px] text-slate-400 mt-1">
+                                      La nubosidad impide observar el cauce del río con el sensor óptico visible.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="p-3 bg-slate-900 rounded border border-emerald-800/60 font-mono text-xs text-emerald-300">
+                                    🛰️ IMAGEN ÓPTICA VÁLIDA · {activeObs?.observationId} ({targetName})
+                                    <p className="text-[11px] text-slate-400 mt-1">
+                                      Cauce de {targetName} visible con posible desborde en margen.
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
 
-                      <div className="space-y-1 mb-4 font-mono text-xs">
-                        <label className="text-slate-300 block mb-1">Clasificación técnica:</label>
-                        <select
-                          value={selectedFinding}
-                          onChange={(e) => setSelectedFinding(e.target.value as Finding)}
-                          className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded p-2 text-xs font-mono"
-                        >
-                          <option value="possible_flood">Posible inundación / desborde</option>
-                          <option value="insufficient">Evidencia insuficiente (recomendado ante nubes)</option>
-                          <option value="normal">Sin afectación aparente</option>
-                        </select>
-                      </div>
+                          <div className="space-y-1 mb-4 font-mono text-xs">
+                            <label className="text-slate-300 block mb-1">Clasificación técnica de esta imagen:</label>
+                            <select
+                              value={selectedFinding}
+                              onChange={(e) => setSelectedFinding(e.target.value as Finding)}
+                              className="w-full bg-slate-900 border border-slate-700 text-slate-100 rounded p-2 text-xs font-mono"
+                            >
+                              <option value="possible_flood">Posible inundación / desborde</option>
+                              <option value="insufficient">Evidencia insuficiente (recomendado ante nubes)</option>
+                              <option value="normal">Sin afectación aparente</option>
+                            </select>
+                          </div>
 
-                      <div className="flex justify-end gap-2">
-                        {snapshot.observations.some((o) => o.transmitted && !o.finding) ? (
-                          <button
-                            onClick={handleClassifyImage}
-                            disabled={role !== 'ground'}
-                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                          >
-                            {role === 'ground' ? 'Registrar Clasificación Científica 🔬' : 'Solo la Base clasifica'}
-                          </button>
-                        ) : (
-                          <button
-                            onClick={handleEvaluateEvidence}
-                            disabled={role !== 'ground' || snapshot.phase !== 'review'}
-                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                          >
-                            {role === 'ground' ? 'Emitir Informe Oficial ante COEN →' : 'Solo la Base emite informe'}
-                          </button>
-                        )}
-                      </div>
+                          <div className="flex justify-end gap-2">
+                            <button
+                              onClick={handleClassifyImage}
+                              disabled={role !== 'ground' || isDispatching}
+                              className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                            >
+                              {role === 'ground' ? 'Registrar Clasificación Científica 🔬' : 'Solo la Base clasifica'}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        /* Todas las imágenes transmitidas están clasificadas */
+                        <div className="space-y-4">
+                          <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-2 text-xs font-mono">
+                            <div className="flex items-center justify-between text-cyan-400 font-bold border-b border-slate-800 pb-1.5">
+                              <span>Evidencias Clasificadas ({snapshot.observations.length})</span>
+                              <span className="text-[11px] text-slate-300">
+                                Válidas:{' '}
+                                <strong
+                                  className={
+                                    usefulEvidence >= requiredEvidence ? 'text-emerald-400' : 'text-amber-400'
+                                  }
+                                >
+                                  {usefulEvidence} / {requiredEvidence}
+                                </strong>
+                              </span>
+                            </div>
+                            <div className="space-y-1">
+                              {snapshot.observations.map((obs) => (
+                                <div
+                                  key={obs.observationId}
+                                  className="flex justify-between items-center bg-slate-900/60 p-2 rounded text-[11px]"
+                                >
+                                  <span>
+                                    <strong>{obs.observationId}</strong> ·{' '}
+                                    {obs.targetId === 'rio-chira' ? 'Río Chira' : 'Río Piura'}
+                                  </span>
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded font-bold ${
+                                      obs.quality === 'valid'
+                                        ? 'bg-emerald-950 text-emerald-300'
+                                        : 'bg-amber-950 text-amber-300'
+                                    }`}
+                                  >
+                                    {obs.finding}
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {usefulEvidence < requiredEvidence ? (
+                            /* Caso A1: Se necesita una segunda observación */
+                            <div className="p-3 bg-amber-950/40 border border-amber-800/80 rounded-xl space-y-2 text-xs font-mono">
+                              <div className="flex items-center justify-between text-amber-300 font-bold">
+                                <span>⚠️ Corroboración Requerida (Misión {floodSnap.scenarioId ?? 'A1'})</span>
+                                <span className="text-[10px] bg-amber-900/80 px-2 py-0.5 rounded">Paso 2 de 2</span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 leading-relaxed">
+                                El protocolo exige corroborar al menos dos cuencas hidrográficas (
+                                {snapshot.observations.some(
+                                  (o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio'
+                                )
+                                  ? 'Río Chira'
+                                  : 'Río Piura'}
+                                ) antes de consolidar el informe final.
+                              </p>
+                              <div className="pt-1 flex justify-end">
+                                {role === 'ground' ? (
+                                  <button
+                                    onClick={() => {
+                                      soundManager.playClick();
+                                      if (
+                                        snapshot.observations.some(
+                                          (o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio'
+                                        )
+                                      ) {
+                                        setSelectedProvince('sullana');
+                                        setSelectedTarget('rio-chira');
+                                      } else {
+                                        setSelectedProvince('piura');
+                                        setSelectedTarget('rio-piura');
+                                      }
+                                      setActiveModal('base');
+                                    }}
+                                    className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded shadow"
+                                  >
+                                    Solicitar 2da Observación (
+                                    {snapshot.observations.some(
+                                      (o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio'
+                                    )
+                                      ? 'Río Chira'
+                                      : 'Río Piura'}
+                                    ) →
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-amber-400 italic">
+                                    Aguardando que la Base CNOIS solicite la segunda zona...
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            /* Evidencias suficientes: Listo para emitir informe */
+                            <div className="p-3 bg-emerald-950/40 border border-emerald-800/80 rounded-xl space-y-2 text-xs font-mono">
+                              <div className="flex items-center justify-between text-emerald-300 font-bold">
+                                <span>✓ Evidencia Suficiente para Dictamen</span>
+                                <span className="text-[10px] bg-emerald-900/80 px-2 py-0.5 rounded">Listo</span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 leading-relaxed">
+                                Se ha completado la corroboración requerida. La Base CNOIS puede emitir el informe oficial
+                                de situación ante el COEN simulado.
+                              </p>
+                              <div className="pt-1 flex justify-end">
+                                {role === 'ground' ? (
+                                  <button
+                                    onClick={handleEvaluateEvidence}
+                                    disabled={role !== 'ground' || snapshot.phase !== 'review' || isDispatching}
+                                    className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-bold text-xs rounded shadow"
+                                  >
+                                    Emitir Informe Oficial ante COEN (Simulado) 📑 →
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] text-cyan-300 italic">
+                                    Aguardando que la Base CNOIS emita el informe final...
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <div>

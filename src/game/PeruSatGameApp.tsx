@@ -1,13 +1,25 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { useStore } from 'zustand';
 import type { Finding, PlayerRole } from '../contracts/mission';
+import type { ConnectionState } from '../core/MissionGateway';
 import { DevMissionGateway } from '../devtools/DevMissionGateway';
-import { useMissionGateway } from '../devtools/devState';
+import type { FloodSnapshot } from '../missions/flood/types';
+import { createMissionStore } from '../store/missionStore';
+import { getSupabaseClient } from '../supabase/supabaseClient';
+import { SupabaseMissionGateway } from '../supabase/SupabaseMissionGateway';
 import { soundManager } from './audio/SoundManager';
 import { RoomLobbyModal } from './lobby/RoomLobbyModal';
 import { FinalMissionReport } from './report/FinalMissionReport';
 import { StationCanvas } from './station/StationCanvas';
-import { SupabaseMissionGateway } from '../supabase/SupabaseMissionGateway';
-import { getSupabaseClient } from '../supabase/supabaseClient';
+
+const SESSION_KEY = 'perusat_crew_session_v1';
+
+const connectionNames: Record<ConnectionState, string> = {
+  disconnected: 'Sin conexión',
+  connecting: 'Conectando',
+  connected: 'Conectado',
+  reconnecting: 'Reconectando',
+};
 
 export const PeruSatGameApp: React.FC = () => {
   const [role, setRole] = useState<PlayerRole>('ground');
@@ -35,7 +47,48 @@ export const PeruSatGameApp: React.FC = () => {
 
   const activeGateway = isMultiplayer && supabaseGateway ? supabaseGateway : devGateway;
 
-  const { snapshot, connectionState } = useMissionGateway(activeGateway, currentRoomId);
+  // Store canónico de misión (Zustand canónico del Rol 01)
+  const store = useMemo(() => createMissionStore(activeGateway), [activeGateway]);
+
+  useEffect(() => {
+    void store.getState().connect(currentRoomId);
+    return () => {
+      store.getState().resetUi();
+    };
+  }, [store, currentRoomId]);
+
+  const snapshot = useStore(store, (s) => s.snapshot);
+  const connectionState = useStore(store, (s) => s.connection);
+  const storeError = useStore(store, (s) => s.error);
+
+  // Recuperar sesión multijugador guardada al recargar el navegador
+  useEffect(() => {
+    const raw = localStorage.getItem(SESSION_KEY);
+    if (!raw || !supabaseGateway) return;
+    try {
+      const saved = JSON.parse(raw);
+      if (saved && saved.roomId && saved.role) {
+        supabaseGateway
+          .getRoomMembership(saved.roomId)
+          .then((member) => {
+            if (member && member.role === saved.role) {
+              setIsMultiplayer(true);
+              setCurrentRoomId(saved.roomId);
+              setAuthenticatedRole(member.role);
+              setRole(member.role);
+              setRoomJoinCode(saved.joinCode || member.joinCode);
+            } else {
+              localStorage.removeItem(SESSION_KEY);
+            }
+          })
+          .catch(() => {
+            localStorage.removeItem(SESSION_KEY);
+          });
+      }
+    } catch {
+      localStorage.removeItem(SESSION_KEY);
+    }
+  }, [supabaseGateway]);
 
   // Música y audio al primer clic
   const handleUserInteraction = () => {
@@ -50,13 +103,14 @@ export const PeruSatGameApp: React.FC = () => {
   const handleRoleSelect = (selectedRole: PlayerRole) => {
     soundManager.playClick();
     if (isMultiplayer && authenticatedRole) {
-      // En multijugador el rol proviene de la sala para evitar suplantaciones
+      // En multijugador el rol proviene exclusivamente de la sala de Supabase
       return;
     }
     setRole(selectedRole);
   };
 
   const handleResetMission = async () => {
+    if (!snapshot) return;
     soundManager.playClick();
     await activeGateway.dispatch(currentRoomId, {
       actionId: crypto.randomUUID(),
@@ -74,6 +128,7 @@ export const PeruSatGameApp: React.FC = () => {
     setAuthenticatedRole(assignedRole);
     setRole(assignedRole);
     setRoomJoinCode(joinCode);
+    localStorage.setItem(SESSION_KEY, JSON.stringify({ roomId, role: assignedRole, joinCode }));
     setActiveTab('game');
   };
 
@@ -82,15 +137,20 @@ export const PeruSatGameApp: React.FC = () => {
     setCurrentRoomId('mision-piura-01');
     setAuthenticatedRole(null);
     setRoomJoinCode(null);
+    localStorage.removeItem(SESSION_KEY);
   };
 
   const handleConfigureSupabase = (url: string, anonKey: string) => {
     setCustomCredentials({ url, anonKey });
   };
 
-  const currentFinding: Finding = (snapshot.observations[0]?.quality === 'cloudy' || scenarioMode === 'emergency')
-    ? 'insufficient'
-    : 'possible_flood';
+  // Hallazgo científico derivado estrictamente del snapshot confirmado
+  const floodSnap = snapshot as FloodSnapshot | null;
+  const currentFinding: Finding =
+    floodSnap?.reportFinding ??
+    (snapshot?.observations.some((o) => o.quality === 'cloudy' && o.finding === 'insufficient')
+      ? 'insufficient'
+      : (snapshot?.observations.find((o) => o.finding)?.finding ?? 'possible_flood'));
 
   return (
     <div
@@ -237,32 +297,70 @@ export const PeruSatGameApp: React.FC = () => {
             {soundMuted ? '🔇' : '🔊'}
           </button>
 
-          {/* Estado de Enlace / Conexión */}
-          <div className="hidden lg:flex items-center gap-1.5 font-mono text-[10px] text-slate-400 bg-slate-950 px-2 py-1 rounded border border-slate-800">
+          {/* Estado de Enlace / Conexión Canónico */}
+          <div className="hidden lg:flex items-center gap-1.5 font-mono text-[10px] text-slate-300 bg-slate-950 px-2.5 py-1 rounded border border-slate-800">
             <span
-              className={`w-1.5 h-1.5 rounded-full ${
+              className={`w-2 h-2 rounded-full ${
                 connectionState === 'connected'
                   ? 'bg-emerald-400 animate-pulse'
+                  : connectionState === 'connecting'
+                  ? 'bg-cyan-400 animate-ping'
                   : connectionState === 'reconnecting'
                   ? 'bg-amber-400 animate-ping'
                   : 'bg-rose-500'
               }`}
             />
-            <span className="capitalize">{connectionState}</span>
+            <span>{connectionNames[connectionState]}</span>
           </div>
         </div>
       </header>
 
       {/* Contenido Principal según Pestaña */}
       <main className="max-w-5xl mx-auto p-3 md:p-4 space-y-4">
-        {activeTab === 'game' && (
-          <StationCanvas
-            snapshot={snapshot}
-            role={role}
-            gateway={activeGateway}
-            scenarioMode={scenarioMode}
-          />
-        )}
+        {activeTab === 'game' &&
+          (!snapshot ? (
+            <div className="bg-slate-900 border border-cyan-800/80 rounded-2xl p-8 text-center text-slate-100 max-w-lg mx-auto my-12 space-y-4 shadow-2xl">
+              <div className="text-3xl animate-bounce">🛰️</div>
+              <h3 className="text-base font-bold text-cyan-300">
+                {isMultiplayer ? 'Sincronizando Misión con Supabase...' : 'Iniciando Estación de Mando...'}
+              </h3>
+              <p className="text-xs text-slate-400 font-mono">
+                {isMultiplayer
+                  ? 'Validando pertenencia de sala y descargando snapshot remoto verificado'
+                  : 'Cargando recursos locales del simulador'}
+              </p>
+              <div className="flex items-center justify-center gap-2 font-mono text-xs text-amber-400">
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    connectionState === 'connected'
+                      ? 'bg-emerald-400'
+                      : connectionState === 'connecting'
+                      ? 'bg-amber-400 animate-pulse'
+                      : 'bg-rose-400'
+                  }`}
+                />
+                <span>Estado: {connectionNames[connectionState]}</span>
+              </div>
+              {storeError && (
+                <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-300 text-xs rounded-xl font-mono text-left space-y-2">
+                  <div>⚠️ {storeError.message}</div>
+                  <button
+                    onClick={() => void store.getState().reconnect()}
+                    className="px-3 py-1 bg-rose-800 hover:bg-rose-700 text-white rounded text-xs"
+                  >
+                    Reintentar conexión ↻
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <StationCanvas
+              snapshot={snapshot}
+              role={role}
+              gateway={activeGateway}
+              scenarioMode={scenarioMode}
+            />
+          ))}
 
         {activeTab === 'briefing' && (
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 text-slate-100 shadow-xl space-y-5">
@@ -323,7 +421,7 @@ export const PeruSatGameApp: React.FC = () => {
           </div>
         )}
 
-        {activeTab === 'report' && (
+        {activeTab === 'report' && snapshot && (
           <FinalMissionReport
             snapshot={snapshot}
             finding={currentFinding}
