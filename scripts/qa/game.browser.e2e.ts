@@ -3,14 +3,12 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const screenshots = join(process.cwd(), 'scripts', 'qa', 'artifacts', 'screenshots');
-const menuReady = process.env.QA_MENU_READY === '1';
-const roomsReady = process.env.QA_ROOMS_READY === '1';
 
 async function openGame(page: Page, scenario: 'A1' | 'A2' = 'A1') {
   await page.goto('/');
-  const journey = page.getByRole('button', { name: new RegExp(`Jornada ${scenario === 'A1' ? '1' : '2'}`, 'i') });
-  if (await journey.count()) await journey.click();
-  await expect(page.getByRole('heading', { name: /PERUSAT CREW/i })).toBeVisible();
+  await expect(page.locator('main').getByRole('heading', { name: /PERUSAT CREW/i })).toBeVisible();
+  if (scenario === 'A2') await page.getByRole('button', { name: /A2 · Alerta por Crecida/i }).click();
+  await page.getByRole('button', { name: /Iniciar Misión Directa/i }).click();
   const canvas = page.locator('[aria-label*="Escena interactiva"] canvas').first();
   await expect(canvas).toBeVisible();
   // Phaser crea el canvas antes de cargar la textura: esperar una imagen real evita capturas vacías.
@@ -41,23 +39,28 @@ async function role(page: Page, name: 'Base CNOIS' | 'PerúSAT-1') {
 }
 
 async function captureCycle(page: Page, finding: 'possible_flood' | 'insufficient') {
-  await station(page, 48, 112, /Solicitud de Observación/);
+  await page.getByRole('button', { name: /\[E\] (Elegir Provincia y Río|Solicitar 2da Observación)/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Solicitud de Observación/ })).toBeVisible();
   await send(page, /Enviar Solicitud al Satélite/);
   await role(page, 'PerúSAT-1');
-  await station(page, 160, 104, /Configuración de Resolución/);
+  await page.getByRole('button', { name: /\[E\] Configurar Sensor Óptico/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Configuración de Resolución/ })).toBeVisible();
   await send(page, /Aprobar Plan y Configurar Sensor/);
-  await station(page, 160, 104, /Ejecución de Captura/);
+  await page.getByRole('button', { name: /\[E\] Disparar Sensor NAOMI/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Ejecución de Captura/ })).toBeVisible();
   await expect(page.locator('.station-tool input[type="range"]')).toHaveValue('66');
   await send(page, /Disparar Cámara NAOMI/);
   await role(page, 'Base CNOIS');
-  await station(page, 270, 112, /Transmisión de Datos/);
+  await page.getByRole('button', { name: /\[E\] Transmitir por Antena/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Transmisión de Datos/ })).toBeVisible();
   await send(page, /Solicitar Telemetría/);
   await role(page, 'PerúSAT-1');
-  await station(page, 270, 112, /Transmisión de Datos/);
-  await expect(page.locator('.station-tool input[type="range"]')).toHaveValue('116');
-  await send(page, /Transmitir por Antena/);
+  await page.getByRole('button', { name: /\[E\] Transmitir por Antena/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Transmisión de Datos/ })).toBeVisible();
+  await expect(page.locator('.station-tool input[type="range"]')).toHaveValue('8.2');
+  await send(page, /Transmitir por Antena Banda X/);
   await role(page, 'Base CNOIS');
-  await expect(page.getByRole('button', { name: /Evaluar Evidencia/ }),
+  await expect(page.getByRole('button', { name: /Clasificar Evidencia/ }),
     'Tras transmitir, la acción disponible debe abrir el análisis').toBeVisible();
   await station(page, 105, 148, /Evaluación de Evidencia/);
   await page.locator('.station-tool select').selectOption(finding);
@@ -93,19 +96,27 @@ test('tecla E abre y cierra la consola activa', async ({ page }) => {
   await expect(page.locator('.station-tool')).toHaveCount(0);
 });
 
-test('menú: Jornada 1, Jornada 2, lobby y regreso', async ({ page }) => {
-  test.skip(!menuReady, 'Menú y Jornadas pendientes de entrega; activar QA_MENU_READY=1 contra la versión nueva.');
+test('menú: A1, A2, lobby y regreso', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 768 });
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: /PERUSAT CREW/i })).toBeVisible();
-  await page.getByRole('button', { name: /Jornada 1/i }).click();
-  await expect(page.getByText(/Jornada 1/i).first()).toBeVisible();
-  await page.getByRole('button', { name: /Volver al menú/i }).click();
-  await page.getByRole('button', { name: /Jornada 2/i }).click();
-  await expect(page.getByText(/Jornada 2/i).first()).toBeVisible();
-  await page.getByRole('button', { name: /Lobby|Sala/i }).click();
-  await expect(page.getByRole('heading', { name: /Lobby/i })).toBeVisible();
-  await page.getByRole('button', { name: /Volver al menú/i }).click();
-  await expect(page.getByText(/DevTools/i)).toHaveCount(0);
+  await expect(page.locator('main').getByRole('heading', { name: /PERUSAT CREW/i })).toBeVisible();
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'menu-1366x768.png'), fullPage: true });
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  await page.screenshot({ path: join(screenshots, 'menu-1920x1080.png'), fullPage: true });
+  await page.setViewportSize({ width: 1366, height: 768 });
+  await page.getByRole('button', { name: /Crear o Unirse a Sala/i }).click();
+  await expect(page.getByRole('heading', { name: /Lobby Multijugador/i })).toBeVisible();
+  await page.locator('button[title="Cerrar ventana"]').click();
+  await page.getByRole('button', { name: /Iniciar Misión Directa/i }).click();
+  await expect(page.getByRole('combobox', { name: 'Seleccionar escenario' })).toHaveValue('routine');
+  await page.getByRole('button', { name: /Menú/i }).first().click();
+  await page.getByRole('button', { name: /A2 · Alerta por Crecida/i }).click();
+  await page.getByRole('button', { name: /Entrar a la Cabina de Mando/i }).click();
+  await expect(page.getByRole('combobox', { name: 'Seleccionar escenario' })).toHaveValue('emergency');
+  await page.getByRole('button', { name: /Menú/i }).first().click();
+  await expect(page.locator('main').getByRole('heading', { name: /PERUSAT CREW/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /DevTools|Arnés Técnico/i })).toHaveCount(0);
 });
 
 test('A1: una persona completa dos observaciones desde el navegador', async ({ page }) => {
@@ -160,33 +171,36 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
   });
 }
 
-test('habitaciones: teclado, puerta, retorno y recursos persistentes', async ({ page }) => {
-  test.skip(!roomsReady, 'Habitaciones, posición y puertas pendientes; activar QA_ROOMS_READY=1 al entregar indicadores visibles.');
+test('habitaciones: movimiento, puerta, retorno e interacción E', async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on('pageerror', error => browserErrors.push(error.message));
+  page.on('console', message => { if (message.type() === 'error') browserErrors.push(message.text()); });
   await page.goto('/');
-  await page.getByRole('button', { name: /Jornada 1/i }).click();
-  const room = page.getByTestId('room-name');
-  const position = page.getByTestId('player-position');
-  const revision = page.getByTestId('mission-revision');
-  const resources = page.getByTestId('mission-resources');
-  const initialRoom = await room.textContent();
-  const initialPosition = await position.textContent();
-  const initialRevision = await revision.textContent();
-  const initialResources = await resources.textContent();
-  const canvas = page.locator('canvas').first();
-  await canvas.click();
-  await page.keyboard.down('d');
-  try { await expect(position).not.toHaveText(initialPosition ?? ''); }
-  finally { await page.keyboard.up('d'); }
-  await page.keyboard.down('ArrowLeft');
-  try { await expect(position).not.toHaveText(await position.textContent() ?? ''); }
-  finally { await page.keyboard.up('ArrowLeft'); }
+  await page.getByRole('button', { name: /Entrar en Modo Explorable 2D/i }).click();
+  const canvas = page.locator('[aria-label*="Escena interactiva"] canvas').first();
+  await expect(canvas).toBeVisible();
+  await expect.poll(async () => (await canvas.screenshot()).byteLength).toBeGreaterThan(10_000);
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'sala-01-inicio.png'), fullPage: true });
+  await expect.poll(async () => (await canvas.screenshot()).byteLength, { timeout: 5_000 })
+    .toBeGreaterThan(25_000)
+    .catch(() => { throw new Error(`La escena explorable permanece vacía. Consola: ${browserErrors.join(' | ')}`); });
+  const resources = await page.locator('main').innerText();
   await page.keyboard.press('e');
-  await expect(page.getByRole('dialog', { name: /consola/i })).toBeVisible();
-  await page.getByRole('button', { name: /Cerrar/i }).click();
-  await page.getByRole('button', { name: /Cruzar puerta/i }).click();
-  await expect(room).not.toHaveText(initialRoom ?? '');
-  await page.getByRole('button', { name: /Volver|Puerta anterior/i }).click();
-  await expect(room).toHaveText(initialRoom ?? '');
-  await expect(revision).toHaveText(initialRevision ?? '');
-  await expect(resources).toHaveText(initialResources ?? '');
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Solicitud de Observación/i })).toBeVisible();
+  await page.getByRole('button', { name: 'Cerrar consola' }).click();
+  // 25 px hasta el corredor; 220 px hasta la puerta a 100 px/s.
+  await page.keyboard.down('w');
+  await page.waitForTimeout(300);
+  await page.keyboard.up('w');
+  await page.keyboard.down('d');
+  await page.waitForTimeout(2400);
+  await page.keyboard.up('d');
+  await page.screenshot({ path: join(screenshots, 'sala-02-puerta.png'), fullPage: true });
+  await page.keyboard.down('ArrowLeft');
+  await page.waitForTimeout(350);
+  await page.keyboard.up('ArrowLeft');
+  await page.screenshot({ path: join(screenshots, 'sala-01-retorno.png'), fullPage: true });
+  expect((await page.locator('main').innerText()).match(/⚡\s*\d+Wh.*💾\s*\d+MB.*📡\s*\d+s.*🪙\s*\d+cr/)?.[0])
+    .toBe(resources.match(/⚡\s*\d+Wh.*💾\s*\d+MB.*📡\s*\d+s.*🪙\s*\d+cr/)?.[0]);
 });

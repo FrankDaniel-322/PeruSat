@@ -1,35 +1,40 @@
-# QA de navegador y jugabilidad
+# QA de navegador de la rama integrada
 
-Estas pruebas son adicionales a `multiplayer.acceptance.test.ts`. Se ejecutan con Edge/Chromium sobre la app real, sin invocar `DevMissionGateway` directamente ni modificar React/Phaser.
+Base probada: `origin/feat/explorable-world-p0` (`d836bbd`), incorporada por rebase al worktree aislado `test/multiplayer-acceptance`. La suite multijugador previa permanece en `multiplayer.acceptance.test.ts`.
 
-**Ejecución del 15-11-2026 sobre el commit base `da67beb`:** 10 casos Playwright: **5 aprobados, 3 fallidos, 2 omitidos**. Los aprobados cubren entrada/lobby, cambio de operador local, tecla E y dos tamaños visuales. Los fallidos son herramientas técnicas visibles y los recorridos A1/A2 bloqueados tras transmitir. Las pruebas omitidas corresponden a menú/Jornadas y habitaciones aún ausentes en esta base. Vitest: 51 aprobados y 2 remotos omitidos; build correcto.
-
-## Comandos
+## Ejecución
 
 ```powershell
-corepack pnpm install --frozen-lockfile
-corepack pnpm exec playwright test -c scripts/qa/playwright.config.ts
+corepack pnpm exec playwright test --config scripts/qa/playwright.config.ts
 corepack pnpm test
 corepack pnpm build
 ```
 
-En Windows se usa Edge instalado. Para Chromium administrado por Playwright, instalarlo con `corepack pnpm exec playwright install chromium` y configurar `QA_BROWSER_CHANNEL=chromium` si se requiere en otra máquina. El config inicia Vite en `127.0.0.1:4174` y lo detiene al terminar. Para evaluar una entrega nueva sin copiar ni alterar el código de Antigravity, fijar `QA_GAME_URL` a su servidor local o de pruebas y correr el mismo comando. No usar una URL productiva para pruebas que generan partidas.
+Playwright usa Edge en Windows, inicia Vite en `127.0.0.1:4174` y conserva screenshot y trace de cada fallo en `scripts/qa/artifacts/results/`. Las capturas de comparación están en `scripts/qa/artifacts/screenshots/`. Ambos directorios están ignorados por Git. Se puede fijar `QA_GAME_URL` para probar un servidor de integración externo.
 
-`QA_MENU_READY=1` activa las pruebas de menú/Jornadas cuando esas pantallas estén disponibles. `QA_ROOMS_READY=1` activa las de habitaciones cuando haya etiquetas visibles `room-name`, `player-position`, `mission-revision` y `mission-resources`, o se adapten los selectores a la UI entregada. Estas pruebas figuran como **omitidas** hasta entonces. No cuentan como aprobadas.
+## Resultado del 15-11-2026
 
-Las capturas y traces quedan en `scripts/qa/artifacts/`, ignorados por Git. Se generan a 1366×768 y 1920×1080. La prueba espera a que Phaser haya dibujado la textura, comprueba proporción del canvas, controles y límites del modal. Las capturas `tooltip-*` permiten revisar la posición del texto dibujado en Phaser; las `inicio-*` y `consola-*` sirven para comparar versiones. No existe aún una línea base visual aprobada: conservar estas capturas como evidencia, y comparar con la versión de Antigravity antes de aceptar diferencias.
+| Área | Resultado | Evidencia |
+| --- | --- | --- |
+| Menú, elección A1/A2, lobby y regreso | PASS | `menu-1366x768.png`; selector de escenario verificado en navegador |
+| Cambio de rol local | PASS | Playwright alterna Base y PerúSAT-1 |
+| Consola E en cabina | PASS | Abre y cierra solicitud de observación |
+| DevTools fuera de la experiencia normal | PASS | No aparece como botón; sigue disponible mediante acceso de evaluador indicado en pie de página |
+| A1, dos observaciones y dictamen | FAIL | Tras la primera transmisión, fase `downlink`; trace A1 |
+| A2, nubes y dictamen | FAIL | Bloqueo tras la primera transmisión; trace A2. El dictamen no se alcanzó |
+| Mundo explorable, movimiento, puertas y E | FAIL | Escena vacía; error del navegador `Phaser is not defined`; trace habitaciones |
+| Cabina y modal 1366×768 | PASS | `inicio-*`, `tooltip-*`, `consola-*` |
+| Cabina y modal 1920×1080 | PASS | `inicio-*`, `tooltip-*`, `consola-*` |
+| Supabase con dos sesiones reales | PENDIENTE | No hay `QA_SUPABASE_URL` ni `QA_SUPABASE_ANON_KEY` de prueba; se conservaron las pruebas remotas |
 
-**Comparación visual observada:** a 1366×768 la cabina y el modal ocupan bien la pantalla; a 1920×1080 el juego queda centrado con márgenes amplios y textos de navegación/HUD pequeños. El arte conserva la proporción 16:9 y no se vieron personajes duplicados. El tooltip de Phaser se guardó como captura, pero su contraste/legibilidad requiere inspección visual al cierre de la animación; la prueba geométrica no acredita legibilidad de texto dibujado en canvas.
+Vitest: 64 PASS, 2 remotos omitidos. Build: PASS. La compilación y las pruebas de reglas no sustituyen los recorridos de navegador fallidos.
 
-## Hallazgos reproducibles en la base del worktree
+## Bloqueos para integración
 
-1. **P0: la partida queda bloqueada tras la primera transmisión.** Recorrido de navegador: Base solicita → Satélite aprueba/captura → Base pide enlace → Satélite transmite. El snapshot permanece en `downlink`; la acción visible sigue siendo «Transmitir por Antena» y la consola de análisis muestra el informe pasivo, no el control de clasificación. `src/missions/flood/rules.ts` deja `phase = 'downlink'` tras transmitir (línea aproximada 290) y solo cambia a `review` dentro de `CLASSIFY_IMAGE` (aprox. 304). `src/game/station/StationCanvas.tsx` muestra el formulario de clasificación únicamente si `phase === 'review'` (aprox. 738). **Sugerencia para Rol 02 + Antigravity:** acordar fase después de la transmisión y habilitar clasificación sin circularidad. No se aplicó parche.
-2. **P0: A1 no puede pedir la segunda observación desde la UI existente.** `src/game/station/StationCanvas.tsx` deshabilita «Enviar Solicitud al Satélite» fuera de `briefing` (aprox. 546); A1 requiere dos capturas. La prueba A1 continuará hasta esa aserción cuando se resuelva el bloqueo anterior. **Sugerencia para Antigravity:** habilitar un nuevo ciclo usando el estado de misión autorizado, sin reiniciar recursos.
-3. **P1 de presentación: herramientas técnicas en la navegación normal.** `src/App.tsx` muestra «DevTools de Integración» y «Arnés Técnico React-Phaser» (aprox. líneas 38 y 48). La prueba dedicada falla. **Sugerencia para Antigravity:** quitar esos accesos de la ruta presentada al jurado; conservar herramientas en sus entradas de desarrollo.
-4. **P1 visual: escala pequeña a 1920×1080.** El lienzo se centra en ~896 px y deja amplios márgenes; la barra superior y los mensajes usan texto pequeño. A 1366×768 la cabina ocupa más área y el modal cabe sin recorte. Pixel art conservó proporción, sin personajes duplicados visibles en las capturas revisadas. Revisar jerarquía visual en pantalla de presentación.
+1. **P0, clasificación inaccesible.** `src/missions/flood/rules.ts` deja `phase = 'downlink'` después de `TRANSMIT_IMAGE` (línea 290) y solo establece `review` después de `CLASSIFY_IMAGE` (línea 304). `src/game/station/StationCanvas.tsx` abre el formulario de clasificación únicamente en `review` (línea 1115). La barra inferior sigue ofreciendo «Transmitir por Antena» después de confirmar la descarga. Rol 02 y Antigravity deben acordar la transición de fase y comprobar que A1 puede volver a `briefing` o iniciar otra observación tras clasificar, sin reiniciar recursos. No se aplicó parche al juego.
+2. **P0, escena explorable vacía.** `src/integration/ExplorableWorldScene.ts` importa `Scene` pero usa `Phaser.Input.Keyboard.KeyCodes` en líneas 69–73 y `Phaser.Math` en líneas 448–449 y 504 sin importar el valor `Phaser`. El navegador lanza `Phaser is not defined`. Antigravity debe importar los símbolos de ejecución de Phaser o usar una importación de valor compatible; después repetir movimiento WASD/flechas, límites, puerta, retorno y E. Las dos respuestas 404 y «Texture key already in use: cabina» también aparecen en consola; verificar sus rutas y precarga al resolver el error principal.
+3. **Fondos del Rol 05.** `public/assets/` contiene `portada.png`, `cabina.png` y `descarga.png`. El menú y la cabina muestran los dos primeros con proporción correcta y sin personajes duplicados evidentes. La escena explorable dibuja salas con objetos Phaser y hoy queda vacía por el error anterior; no se pudo aprobar visualmente el fondo de Sala 01/02. `descarga.png` no forma parte de las capturas de cabina iniciales.
 
-## Alcance de las pruebas pendientes
+Las capturas de 1366×768 y 1920×1080 muestran modal dentro de pantalla y pixel art sin distorsión evidente. A 1920×1080 el juego queda centrado en un ancho de ~896 px, con margen amplio y texto pequeño; revisar en el monitor de presentación. No hay línea base de diffs visuales aprobada: las capturas actuales permiten comparación manual y las pruebas geométricas no certifican legibilidad de texto renderizado en canvas.
 
-- **Menú/Jornadas:** no existen en el commit base del worktree. Al activar el flag, Playwright exigirá iniciar Jornada 1 y 2, entrar al lobby, volver y no ver herramientas técnicas.
-- **Habitaciones:** no hay movimiento ni puertas en `StationScene` del commit base; solo balizas y tecla E. La prueba pendiente pulsa WASD/flechas, verifica posición, consola, puerta, retorno y conservación de recursos/revisión. Al entregarse la escena, adaptar selectores visibles y recorrido de puerta sin introducir un estado de misión paralelo.
-- **A1/A2:** las pruebas actuales son de navegador y fallan en un bloqueo real. No confundirlas con los recorridos directos del gateway que sí pasan. Cuando el juego cambie, ejecutarlas de nuevo contra la URL de esa versión y guardar las capturas/traces nuevas.
+Para ejecutar el smoke remoto, configurar las variables públicas de `scripts/qa/README.md` con sesiones de prueba y ejecutar en PowerShell `$env:QA_RUN_REMOTE='1'; corepack pnpm test`. No usar `service_role` ni publicar JWT.
