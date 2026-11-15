@@ -2,8 +2,8 @@
 // Fuentes: Documento Maestro (sección 10: energía, memoria, contacto, presupuesto).
 // Valores didácticos diseñados para modelar compensaciones de ingeniería aeroespacial.
 
-import type { Finding, MissionResources, Quality } from '../../contracts/mission';
-import type { DenialCode, ProfileId, ScenarioId, TargetId } from './types';
+import type { Finding, MissionResources, Quality } from '../../contracts/mission.ts';
+import type { DenialCode, ProfileId, ScenarioId, TargetId } from './types.ts';
 
 export const RULES_VERSION = 'flood-rules-1';
 

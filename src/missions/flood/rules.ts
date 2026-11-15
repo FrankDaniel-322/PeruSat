@@ -1,7 +1,9 @@
 // Motor de reglas de la Misión A (flood-piura-01) · Integrado para Rol 01.
 // Funciones PURAS: deterministas, sin efectos colaterales de red, reloj ni azar.
 
-import type { Finding, MissionAction, MissionResources, PlayerRole, Quality } from '../../contracts/mission';
+// Los imports relativos llevan extensión .ts para que el mismo archivo funcione en Vite/Vitest
+// y en las Edge Functions de Supabase (Deno exige la extensión).
+import type { Finding, MissionAction, MissionResources, PlayerRole, Quality } from '../../contracts/mission.ts';
 import type {
   ActionEnvelope,
   AppliedEvent,
@@ -13,7 +15,7 @@ import type {
   ScenarioId,
   ScoreResult,
   TargetId,
-} from './types';
+} from './types.ts';
 import {
   CAPTURE_ENERGY_WH,
   DENIAL_MESSAGES,
@@ -24,8 +26,8 @@ import {
   SCENARIOS,
   TARGETS,
   TRANSMIT_ENERGY_WH,
-} from './config';
-import type { CaptureProfile } from './config';
+} from './config.ts';
+import type { CaptureProfile } from './config.ts';
 
 type Actor = PlayerRole | 'both';
 
@@ -386,7 +388,9 @@ export function computeScore(snapshot: FloodSnapshot, allEvents: AppliedEvent[])
     (o) =>
       o.quality === 'valid' &&
       o.finding !== undefined &&
-      o.finding !== TARGETS[o.targetId as TargetId]?.truth,
+      // Se normaliza el alias de zona (p. ej. 'rio-piura' -> 'piura-rio'); sin esto una
+      // clasificación correcta sobre un alias se contaba como error (-8 puntos).
+      o.finding !== TARGETS[normalizeTargetId(o.targetId) as TargetId]?.truth,
   ).length;
 
   const rigor = Math.max(

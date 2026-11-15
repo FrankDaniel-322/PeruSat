@@ -7,7 +7,7 @@ import type {
   MissionSnapshot,
   Observation,
   PlayerRole,
-} from '../../contracts/mission';
+} from '../../contracts/mission.ts';
 
 export type ScenarioId = 'A1' | 'A2';
 export type ProfileId = 'standard' | 'detailed' | 'compressed';
