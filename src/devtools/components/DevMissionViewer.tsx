@@ -71,9 +71,9 @@ export const DevMissionViewer: React.FC<DevMissionViewerProps> = ({
 
           <span
             className={`px-3 py-1 rounded text-xs font-bold uppercase tracking-wider ${
-              status === 'active'
+              status === 'ready' || status === 'running'
                 ? 'bg-blue-950 text-blue-300 border border-blue-800'
-                : status === 'completed'
+                : status === 'won'
                 ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
                 : 'bg-rose-950 text-rose-300 border border-rose-800'
             }`}

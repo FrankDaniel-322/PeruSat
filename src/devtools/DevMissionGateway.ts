@@ -50,7 +50,7 @@ export function createInitialSnapshot(roomId: string): MissionSnapshot {
     roomId,
     missionId: 'flood-piura-01',
     phase: 'briefing',
-    status: 'active',
+    status: 'ready',
     revision: 0,
     resources: initialResources,
     observations: [],
@@ -211,6 +211,7 @@ export class DevMissionGateway implements MissionGateway {
         }
 
         snap.phase = 'planning';
+        snap.status = 'running';
         snap.selectedTargetId = action.payload.targetId;
         snap.revision += 1;
         return snap;
@@ -415,7 +416,8 @@ export class DevMissionGateway implements MissionGateway {
         }
 
         snap.phase = 'debrief';
-        snap.status = 'completed';
+        // Local diagnostic outcome only; Role 02 owns final A1/A2 scoring.
+        snap.status = action.payload.finding === 'insufficient' ? 'lost' : 'won';
         snap.revision += 1;
         return snap;
       }

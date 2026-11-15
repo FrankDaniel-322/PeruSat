@@ -6,6 +6,7 @@ describe('MockMissionGateway', () => {
     const hub = new MockMissionHub();
     const ground = new MockMissionGateway(hub);
     const satellite = new MockMissionGateway(hub);
+    expect((await ground.getSnapshot('room-1')).status).toBe('ready');
     const received: number[] = [];
     const unsubscribe = satellite.subscribe('room-1', (event) => {
       if (event.kind === 'confirmed') received.push(event.change.snapshot.revision);
@@ -20,6 +21,7 @@ describe('MockMissionGateway', () => {
     expect(received).toEqual([1]);
     expect((await satellite.getSnapshot('room-1')).selectedTargetId).toBe('piura');
     expect((await satellite.getSnapshot('room-1')).revision).toBe(1);
+    expect((await satellite.getSnapshot('room-1')).status).toBe('running');
     unsubscribe();
   });
 

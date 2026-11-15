@@ -26,8 +26,8 @@ export interface Observation {
   transmitted: boolean;
 }
 
-/** Status is intentionally independent of phase: a phase may be active, completed, or blocked. */
-export type MissionStatus = 'active' | 'completed' | 'failed';
+/** Mission outcome is independent of the current phase (Documento Maestro v3). */
+export type MissionStatus = 'ready' | 'running' | 'won' | 'lost';
 
 export interface MissionSnapshot {
   schemaVersion: 3;

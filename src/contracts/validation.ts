@@ -4,7 +4,7 @@ const phases = ['briefing', 'planning', 'capture', 'downlink', 'review', 'debrie
 const qualities = ['valid', 'cloudy', 'corrupt', 'incomplete'];
 const findings = ['normal', 'possible_flood', 'insufficient'];
 const providers = ['NASA', 'CONIDA', 'GAME_SIMULATION'];
-const statuses = ['active', 'completed', 'failed'];
+const statuses = ['ready', 'running', 'won', 'lost'];
 
 const object = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);

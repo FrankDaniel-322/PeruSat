@@ -5,11 +5,15 @@ describe('schemaVersion 3 contracts', () => {
   it('accepts valid Mission A snapshots and rejects negative resources', () => {
     const snapshot = {
       schemaVersion: 3, roomId: 'room-1', missionId: 'flood-piura-01',
-      phase: 'briefing', status: 'active', revision: 0,
+      phase: 'briefing', status: 'ready', revision: 0,
       resources: { energyWh: 0, storageMb: 0, contactSeconds: 0, budgetCredits: 0, massKg: 0 },
       observations: [],
     };
     expect(isMissionSnapshot(snapshot)).toBe(true);
+    expect(isMissionSnapshot({ ...snapshot, status: 'running' })).toBe(true);
+    expect(isMissionSnapshot({ ...snapshot, status: 'won' })).toBe(true);
+    expect(isMissionSnapshot({ ...snapshot, status: 'lost' })).toBe(true);
+    expect(isMissionSnapshot({ ...snapshot, status: 'active' })).toBe(false);
     expect(isMissionSnapshot({ ...snapshot, resources: { ...snapshot.resources, energyWh: -1 } })).toBe(false);
     expect(isMissionSnapshot({ ...snapshot, schemaVersion: 2 })).toBe(false);
   });

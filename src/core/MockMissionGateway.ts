@@ -25,7 +25,7 @@ function createSnapshot(roomId: string): MissionSnapshot {
     roomId,
     missionId: 'flood-piura-01',
     phase: 'briefing',
-    status: 'active',
+    status: 'ready',
     revision: 0,
     // Zeroes are placeholders only; Role 02 owns mission resource initialization.
     resources: { energyWh: 0, storageMb: 0, contactSeconds: 0, budgetCredits: 0, massKg: 0 },
@@ -76,6 +76,7 @@ export class MockMissionGateway implements MissionGateway {
     const snapshot: MissionSnapshot = {
       ...room.snapshot,
       phase: 'planning',
+      status: 'running',
       selectedTargetId: action.payload.targetId,
       revision: room.snapshot.revision + 1,
     };

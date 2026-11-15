@@ -10,6 +10,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
     let snap = await gateway.getSnapshot(roomId);
 
     expect(snap.phase).toBe('briefing');
+    expect(snap.status).toBe('ready');
     expect(snap.revision).toBe(0);
     expect(snap.resources.energyWh).toBe(100);
     expect(snap.resources.storageMb).toBe(70);
@@ -25,6 +26,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
     };
     const res1 = await gateway.dispatch(roomId, action1);
     expect(res1.snapshot.phase).toBe('planning');
+    expect(res1.snapshot.status).toBe('running');
     expect(res1.snapshot.selectedTargetId).toBe('rio-piura');
     expect(res1.snapshot.revision).toBe(1);
 
@@ -107,7 +109,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
     };
     const res7 = await gateway.dispatch(roomId, action7);
     expect(res7.snapshot.phase).toBe('debrief');
-    expect(res7.snapshot.status).toBe('completed');
+    expect(res7.snapshot.status).toBe('won');
     expect(res7.snapshot.revision).toBe(7);
   });
 
@@ -169,7 +171,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { finding: 'insufficient' },
     });
     expect(repRes.snapshot.phase).toBe('debrief');
-    expect(repRes.snapshot.status).toBe('completed');
+    expect(repRes.snapshot.status).toBe('lost');
   });
 
   describe('Casos Borde e Invariantes del Sistema', () => {
