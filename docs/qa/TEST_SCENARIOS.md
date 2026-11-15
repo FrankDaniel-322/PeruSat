@@ -14,7 +14,7 @@ Validar que el flujo completo de observación, captura, transmisión y generaci�
 ### Parámetros Iniciales de la Misión
 - `missionId`: `'flood-piura-01'`
 - `phase`: `'briefing'`
-- `status`: `'active'`
+- `status`: `'ready'`
 - `revision`: `0`
 - `resources`:
   - `energyWh`: 100 Wh
@@ -55,7 +55,7 @@ Validar que el flujo completo de observación, captura, transmisión y generaci�
    - Base despacha `CLASSIFY_IMAGE` con `payload: { observationId: 'obs-piura-01', finding: 'possible_flood' }`.
    - Base despacha `SUBMIT_REPORT` con `payload: { finding: 'possible_flood' }`.
    - *Resultado esperado:*
-     - Fase avanza a `'debrief'`; `status: 'completed'`.
+     - Fase avanza a `'debrief'`; `status: 'won'` o `'lost'` según la evidencia.
      - Se registra informe simulado con evidencia trazable.
      - Puntaje educativo evaluado con puntuación alta (>90 pts).
 

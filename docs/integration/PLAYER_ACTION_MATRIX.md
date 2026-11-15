@@ -63,7 +63,7 @@
   - Se ha evaluado al menos una observación transmitida.
 - **Efecto en recursos:** Ninguno.
 - **Transición de fase:** `review` → `debrief`.
-- **Estado de misión resultante:** `status: 'completed'`.
+- **Estado de misión resultante:** `status: 'won'` o `'lost'`, según la evaluación autorizada del Rol 02.
 - **Posibles errores:**
   - `INVALID_ACTION`: Intento de enviar informe sin observaciones o por el satélite. Mensaje: *«Solo la Base puede emitir el informe final de situación una vez revisadas las evidencias.»*
 

@@ -6,7 +6,7 @@
 
 La demo principal y `/role01-demo.html` usan `createMissionStore`. `src/devtools/DevApp.tsx` conserva un hook React propio (`devState.ts`) para una consola de diagnóstico que no está montada en esas entradas. Mantenerlo solo como herramienta temporal; si se incorpora a la aplicación, migrar esa proyección al store canónico antes de conectarla a Supabase. Así no aparecen dos rutas de sincronización en el producto.
 
-El texto v3 disponible no enumera los valores permitidos de `status`; el Rol 02 debe confirmarlos con el Documento Maestro antes de cerrar el esquema SQL y la validación de entrada. No se alteran las fases, acciones ni propiedades de `MissionSnapshot` para resolver esa duda.
+`docs/specs/CONTRACTS_V3.md` confirma `status: 'ready' | 'running' | 'won' | 'lost'`. El tipo, validador y mocks locales ya usan estos valores. Rol 02 debe mantenerlos en SQL y Realtime. Antes de conectar el adaptador remoto, acordar otra diferencia: el Documento Maestro expresa las acciones con campos directos y `SUBMIT_REPORT` con `reportId`; el cliente actual usa un sobre de transporte (`actionId`, `actorRole`, `expectedRevision`, `payload`) y `SUBMIT_REPORT.payload.finding`. Documentar y resolver la traducción en el límite del gateway con Rol 01, sin aceptar dos formatos implícitos ni confiar en `actorRole` del navegador.
 
 ## Ciclo de sala pendiente del Rol 02
 

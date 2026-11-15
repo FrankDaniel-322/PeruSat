@@ -27,4 +27,4 @@ Abrir un **PR en borrador** hacia la rama principal remota. Adjuntar el resultad
 
 ## Decisión pendiente de contrato
 
-El Documento Maestro completo no está disponible en este repositorio ni en las fuentes conectadas consultadas. Se conserva el tipo `MissionStatus = 'active' | 'completed' | 'failed'` del commit base. Una guía antigua mencionaba `won / lost`; se corrigió esa afirmación porque el prototipo emite `completed`. Rol 01 y Rol 02 deben confirmar la enumeración canónica antes de modificar TypeScript, SQL o payloads de Realtime.
+El Documento Maestro se incorporó en `docs/specs/GAME_SPEC.md` y `docs/specs/CONTRACTS_V3.md`. El estado canónico es `MissionStatus = 'ready' | 'running' | 'won' | 'lost'`; el tipo, validador y mocks locales quedaron alineados. Rol 02 debe usar estos cuatro valores en SQL y Realtime. La diferencia pendiente en la forma de las acciones se detalla en `ROLE02_SUPABASE_HANDOFF.md`.

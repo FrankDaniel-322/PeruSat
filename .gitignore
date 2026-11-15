@@ -1,7 +1,34 @@
+# Dependencies
 node_modules/
+.pnpm-store/
+
+# Build artifacts
 dist/
+dist-ssr/
 coverage/
 *.tsbuildinfo
+
+# Environment and secrets
 .env*
 !.env.example
 *.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# OS / Editor metadata
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Internal working references, raw zip archives, and uncompressed prototypes
+docs/references/
+prototypes/
+*.zip
+*.rar
+*.tar.gz

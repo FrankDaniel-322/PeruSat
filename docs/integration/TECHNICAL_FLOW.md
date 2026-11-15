@@ -88,7 +88,7 @@ stateDiagram-v2
       Clasifica hallazgo
     end note
 
-    debrief --> [*]: Misión concluida (status: completed en el prototipo; confirmar con Documento Maestro)
+    debrief --> [*]: Misión concluida (status: won o lost)
     note right of debrief
       Evaluación de decisiones
       Cálculo de puntaje didáctico

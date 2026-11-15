@@ -105,7 +105,7 @@ BASE CNOIS (Ground)                                     SATÉLITE (Satellite)
         | -- Envía CLASSIFY_IMAGE (finding: "possible_flood")    |
         | -- Elabora informe de situación                        |
         | -- Envía SUBMIT_REPORT (finding)                       |
-        | -----------------------------------------------------> | (Ambos ven estado de misión: 'completed')
+        | -----------------------------------------------------> | (Ambos ven resultado: 'won' o 'lost')
         |                                                        |
    (08) | <======== FASE DE DEBRIEFING Y EVALUACIÓN ===========> | (Revisión de decisiones, recursos y lecciones)
 ```
