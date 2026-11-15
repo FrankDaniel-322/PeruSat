@@ -1,3 +1,119 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* PERUSAT CREW — Estilos canónicos de la cabina espacial (UX/UI Standalone Alignment) */
+.cabin-frame {
+  position: relative;
+  background: #01143b;
+  isolation: isolate;
+  aspect-ratio: 16 / 9;
+  width: 100%;
+}
+
+.cabin-frame canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+/* Bocadillo del Gato Guía: Discreto, compacto y en el borde inferior */
+.cat-bubble {
+  position: absolute;
+  z-index: 10;
+  left: 50%;
+  bottom: 8px;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: 85%;
+  padding: 4px 10px;
+  background: rgba(1, 20, 59, 0.94);
+  color: #f6f5e4;
+  border: 1.5px solid #07d8f8;
+  box-shadow: 2px 2px 0 #06387d;
+  font-family: monospace;
+  font-size: 11px;
+  line-height: 1.25;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.cat-bubble.cat-alert {
+  border-color: #ffb02e;
+  box-shadow: 2px 2px 0 #854951;
+}
+
+.cat-bubble.cat-alert strong {
+  color: #ffb02e;
+}
+
+.cat-bubble strong {
+  display: inline;
+  margin-right: 6px;
+  color: #07d8f8;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Modal de tareas de consola */
+.station-task-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(1, 20, 59, 0.88);
+  backdrop-filter: blur(2px);
+  padding: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+}
+
+.station-tool {
+  position: relative;
+  background: #021c4a;
+  border: 2px solid #07d8f8;
+  box-shadow: 4px 4px 0 #01143b;
+  width: min(100%, 520px);
+  padding: 16px;
+  color: #f6f5e4;
+  font-family: monospace;
+}
+
+.station-tool h3 {
+  margin: 4px 0 8px;
+  font-size: 16px;
+  color: #07d8f8;
+}
+
+/* Pista de alineación de mira óptica */
+.aim-track {
+  height: 26px;
+  position: relative;
+  background: repeating-linear-gradient(90deg, #062b63 0 9%, #135dbd 9% 10%);
+  border: 1px solid #135dbd;
+  margin: 10px 0;
+}
+
+.aim-track i {
+  position: absolute;
+  width: 6px;
+  height: 100%;
+  top: 0;
+  background: #07d8f8;
+  left: 66%;
+  box-shadow: 0 0 6px #07d8f8;
+}
+
+.aim-track b {
+  position: absolute;
+  width: 6px;
+  height: 100%;
+  top: 0;
+  background: #ffb02e;
+  box-shadow: 0 0 6px #ffb02e;
+  transition: left 0.05s ease-out;
+}

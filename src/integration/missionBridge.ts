@@ -1,14 +1,18 @@
 import { EventBus } from '../game/EventBus';
 
-export interface ReactGameRequest {
-  kind: 'focusTarget';
-  targetId: string;
-}
+export type StationId = 'base' | 'camera' | 'antenna' | 'report';
 
-export interface PhaserInteraction {
-  kind: 'targetSelected';
-  targetId: string;
-}
+export type ReactGameRequest =
+  | { kind: 'focusTarget'; targetId: string }
+  | { kind: 'setActiveStation'; stationId: StationId | null }
+  | { kind: 'triggerShutterEffect' }
+  | { kind: 'triggerDownlinkEffect' }
+  | { kind: 'triggerAlertEffect' };
+
+export type PhaserInteraction =
+  | { kind: 'targetSelected'; targetId: string }
+  | { kind: 'stationSelected'; stationId: StationId }
+  | { kind: 'canvasClicked'; x: number; y: number };
 
 const reactRequestEvent = 'mission:react-request';
 const phaserInteractionEvent = 'mission:phaser-interaction';
