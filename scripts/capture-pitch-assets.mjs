@@ -67,13 +67,24 @@ server.listen(PORT, async () => {
     await new Promise((r) => setTimeout(r, 1500));
 
     // Cambiar a Mundo Explorable 2D
-    const explorableBtn = await page.waitForSelector('button ::-p-text(Mundo Explorable 2D)');
+    const explorableBtn = await page.waitForSelector('button ::-p-text(Base Espacial 2D)');
     if (explorableBtn) await explorableBtn.click();
     await new Promise((r) => setTimeout(r, 1500));
 
     // 3. Centro de Operaciones CNOIS
     console.log('Capturando: 04_centro_operaciones_cnois.png');
     await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '04_centro_operaciones_cnois.png') });
+
+    // Abrir consola geográfica Base CNOIS (Etapa 1: Tierra sin mostrar Piura de inmediato)
+    await page.keyboard.press('KeyE');
+    await new Promise((r) => setTimeout(r, 800));
+    console.log('Capturando: 04b_consola_geografica_tierra.png');
+    await page.screenshot({ path: path.join(SCREENSHOTS_DIR, '04b_consola_geografica_tierra.png') });
+
+    // Cerrar modal
+    const closeBaseModal = await page.$('button[aria-label="Cerrar consola"]');
+    if (closeBaseModal) await closeBaseModal.click();
+    await new Promise((r) => setTimeout(r, 500));
 
     // Clip 2: Exploración Base con WASD
     console.log('Grabando movimiento de astronauta...');

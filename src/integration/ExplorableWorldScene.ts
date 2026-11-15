@@ -24,13 +24,13 @@ const WORLD_STATIONS: StationLocation[] = [
   { id: 'antenna', name: 'Terminal Banda X', icon: '⌁', x: 235, y: 118, color: 0xffb02e, room: 'payload_link' },
 
   // 3. Lobby Central
-  { id: 'base', name: 'Terminal Central', icon: '❖', x: 160, y: 120, color: 0x07d8f8, room: 'lobby' },
+  { id: 'lobby', name: 'Terminal de Base', icon: '❖', x: 160, y: 120, color: 0x07d8f8, room: 'lobby' },
 
   // 4. Sala Briefing
-  { id: 'base', name: 'Mesa Táctica Briefing', icon: 'ℹ', x: 160, y: 112, color: 0x07d8f8, room: 'briefing' },
+  { id: 'briefing', name: 'Mesa Táctica Briefing', icon: 'ℹ', x: 160, y: 112, color: 0x07d8f8, room: 'briefing' },
 
   // 5. Sala Debrief
-  { id: 'report', name: 'Consola Informe Final', icon: '📄', x: 160, y: 118, color: 0x10b981, room: 'debrief' },
+  { id: 'debrief', name: 'Consola Informe Final', icon: '📄', x: 160, y: 118, color: 0x10b981, room: 'debrief' },
 ];
 
 export class ExplorableWorldScene extends Scene {
@@ -44,6 +44,7 @@ export class ExplorableWorldScene extends Scene {
   private roomContainer: Phaser.GameObjects.Container | null = null;
   private playerContainer: Phaser.GameObjects.Container | null = null;
   private playerSprite: Phaser.GameObjects.Graphics | null = null;
+  private playerSpriteImage: Phaser.GameObjects.Image | null = null;
   private promptContainer: Phaser.GameObjects.Container | null = null;
   private promptText: Phaser.GameObjects.Text | null = null;
   private promptBg: Phaser.GameObjects.Rectangle | null = null;
@@ -72,13 +73,24 @@ export class ExplorableWorldScene extends Scene {
   }
 
   preload(): void {
-    // Fondos ilustrados de salas (Rol 05)
+    // Fondos ilustrados de salas oficiales (Rol 05)
     this.load.image('room_base_cnois', '/assets/rooms/base-cnois.png');
     this.load.image('room_satellite', '/assets/rooms/satellite.png');
     this.load.image('room_briefing', '/assets/rooms/briefing.png');
     this.load.image('room_debrief', '/assets/rooms/debrief.png');
     this.load.image('room_lobby', '/assets/rooms/lobby.png');
     this.load.image('cabina', '/assets/cabina.png');
+
+    // Sprites de personajes, mascota y objetos oficiales (Rol 05 commit 1509589)
+    this.load.image('player_male', '/assets/sprites/player-male.png');
+    this.load.image('player_female', '/assets/sprites/player-female.png');
+    this.load.image('mascot', '/assets/sprites/mascot.png');
+    this.load.image('world_sprite', '/assets/sprites/world-sprite.png');
+    this.load.image('scenario_sprites', '/assets/sprites/scenario-sprites.png');
+    this.load.image('object_sprites', '/assets/sprites/object-sprites.png');
+    this.load.image('room_icons', '/assets/icons/room-icons.png');
+    this.load.image('buttons_icons', '/assets/icons/buttons-icons.png');
+    this.load.image('interaction_icons', '/assets/icons/interaction-icons.png');
   }
 
   create(): void {
@@ -307,6 +319,32 @@ export class ExplorableWorldScene extends Scene {
   private drawCat(x: number, y: number): void {
     if (!this.roomContainer) return;
 
+    if (this.textures.exists('mascot')) {
+      // Mascota oficial del Rol 05
+      const catImg = this.add.image(x, y, 'mascot');
+      catImg.setDisplaySize(18, 20);
+
+      const catLabel = this.add.text(x, y - 14, '🐱 Michi-guía', {
+        fontFamily: 'monospace',
+        fontSize: '5.5px',
+        color: '#f6f5e4',
+        backgroundColor: '#01143bcc',
+        padding: { x: 3, y: 1 },
+      }).setOrigin(0.5);
+
+      this.tweens.add({
+        targets: catImg,
+        y: { from: y, to: y - 2 },
+        duration: 800,
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut',
+      });
+
+      this.roomContainer.add([catImg, catLabel]);
+      return;
+    }
+
     const catG = this.add.graphics();
     catG.fillStyle(0xf6f5e4, 1);
     catG.fillRect(x - 4, y - 6, 8, 8); // Cabeza
@@ -392,9 +430,16 @@ export class ExplorableWorldScene extends Scene {
     this.playerContainer = this.add.container(this.playerX, this.playerY);
     this.playerContainer.setDepth(15);
 
-    this.playerSprite = this.add.graphics();
-    this.renderPlayerSprite(this.playerSprite, 'right');
-    this.playerContainer.add(this.playerSprite);
+    if (this.textures.exists('player_male')) {
+      // Sprite oficial de Rol 05
+      this.playerSpriteImage = this.add.image(0, -6, 'player_male');
+      this.playerSpriteImage.setDisplaySize(18, 26);
+      this.playerContainer.add(this.playerSpriteImage);
+    } else {
+      this.playerSprite = this.add.graphics();
+      this.renderPlayerSprite(this.playerSprite, 'right');
+      this.playerContainer.add(this.playerSprite);
+    }
 
     const shadow = this.add.ellipse(0, 8, 12, 4, 0x01143b, 0.6);
     this.playerContainer.addAt(shadow, 0);
@@ -593,10 +638,28 @@ export class ExplorableWorldScene extends Scene {
 
     this.playerContainer.setPosition(this.playerX, this.playerY);
 
-    if (vx < 0 && this.playerSprite) {
-      this.renderPlayerSprite(this.playerSprite, 'left');
-    } else if (vx > 0 && this.playerSprite) {
-      this.renderPlayerSprite(this.playerSprite, 'right');
+    if (vx < 0) {
+      if (this.playerSpriteImage) {
+        this.playerSpriteImage.setFlipX(true);
+      } else if (this.playerSprite) {
+        this.renderPlayerSprite(this.playerSprite, 'left');
+      }
+    } else if (vx > 0) {
+      if (this.playerSpriteImage) {
+        this.playerSpriteImage.setFlipX(false);
+      } else if (this.playerSprite) {
+        this.renderPlayerSprite(this.playerSprite, 'right');
+      }
+    }
+
+    // Animación sutil de paso
+    if (this.playerSpriteImage) {
+      if (vx !== 0 || vy !== 0) {
+        const step = Math.sin(_time / 120) * 1.5;
+        this.playerSpriteImage.setY(-6 + step);
+      } else {
+        this.playerSpriteImage.setY(-6);
+      }
     }
 
     // Comprobar proximidad a puertas

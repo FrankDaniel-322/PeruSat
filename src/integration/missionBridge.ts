@@ -1,6 +1,6 @@
 import { EventBus } from '../game/EventBus';
 
-export type StationId = 'base' | 'camera' | 'antenna' | 'report';
+export type StationId = 'base' | 'camera' | 'antenna' | 'report' | 'briefing' | 'debrief' | 'lobby';
 
 export type ReactGameRequest =
   | { kind: 'focusTarget'; targetId: string }

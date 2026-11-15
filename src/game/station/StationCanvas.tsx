@@ -101,6 +101,8 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
   // Estados locales para tareas de consola
   const [selectedProvince, setSelectedProvince] = useState<'piura' | 'sullana'>('piura');
   const [selectedTarget, setSelectedTarget] = useState<'rio-piura' | 'rio-chira'>('rio-piura');
+  // Etapa interactiva en consola geográfica (Tierra -> Sudamérica -> Perú -> Piura -> Cuenca)
+  const [geoStage, setGeoStage] = useState<'earth' | 'south_america' | 'peru' | 'piura' | 'target_basin'>('earth');
   const [selectedProfile, setSelectedProfile] = useState<'compressed' | 'standard' | 'detailed'>('standard');
   const [aimValue, setAimValue] = useState<number>(66);
   // Frecuencia satelital Banda X: 8.20 GHz (realista para bajada de imágenes de alta resolución)
@@ -650,9 +652,9 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                   ? 'bg-emerald-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200'
               }`}
-              title="Mundo interactivo 2D: Camina con WASD entre 2 salas y pulsa [E] para operar"
+              title="Mundo interactivo 2D: Camina con WASD por las 5 salas de la base y pulsa [E] para operar consolas"
             >
-              🚶 Mundo Explorable 2D (2 Salas)
+              🚶 Base Espacial 2D (5 Salas)
             </button>
             <button
               onClick={() => {
@@ -737,99 +739,332 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
               {/* Contenido según la consola abierta */}
               {activeModal === 'base' && (
                 <div>
-                  <div className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
-                    Base CNOIS · Estación Terrena
-                  </div>
-                  <h3>Solicitud de Observación Óptica</h3>
-                  <p className="text-xs text-slate-300 mb-3">
-                    Selecciona el río prioritario para monitoreo de crecida.
-                  </p>
-
-                  <div className="grid grid-cols-2 gap-2 mb-3">
-                    <button
-                      onClick={() => {
-                        setSelectedProvince('piura');
-                        setSelectedTarget('rio-piura');
-                      }}
-                      className={`px-3 py-1.5 text-xs font-mono font-bold rounded border ${
-                        selectedProvince === 'piura'
-                          ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                          : 'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
-                    >
-                      Provincia de Piura {snapshot.observations.some((o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio') ? '✓' : ''}
-                    </button>
-                    <button
-                      onClick={() => {
-                        setSelectedProvince('sullana');
-                        setSelectedTarget('rio-chira');
-                      }}
-                      className={`px-3 py-1.5 text-xs font-mono font-bold rounded border ${
-                        selectedProvince === 'sullana'
-                          ? 'bg-cyan-500 text-slate-950 border-cyan-400'
-                          : 'bg-slate-800 text-slate-300 border-slate-700'
-                      }`}
-                    >
-                      Provincia de Sullana {snapshot.observations.some((o) => o.targetId === 'rio-chira' || o.targetId === 'piura-urbano') ? '✓' : ''}
-                    </button>
-                  </div>
-
-                  {/* Canvas esquemático de mapa */}
-                  <div className="border border-slate-700 bg-slate-950 p-1 rounded mb-3">
-                    <canvas
-                      ref={(canvas) => {
-                        if (canvas) {
-                          const ctx = canvas.getContext('2d');
-                          if (ctx) {
-                            drawPeruMap(ctx, 320, 120, selectedTarget, scenarioMode === 'emergency');
-                          }
-                        }
-                      }}
-                      width={320}
-                      height={120}
-                      className="w-full h-auto rounded block"
-                    />
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs bg-slate-900/80 p-2 rounded border border-slate-800 mb-4 font-mono">
-                    <span className="text-slate-400">Objetivo seleccionado:</span>
-                    <span className="text-cyan-400 font-bold">
-                      {selectedTarget === 'rio-piura' ? 'Río Piura' : 'Río Chira'}
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider font-mono">
+                      Consola Geográfica · Base CNOIS (Pucusana)
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">
+                      Órbita LEO / Cartografía
                     </span>
                   </div>
 
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    {!isMultiplayer && role !== 'ground' && (
+                  {/* Selector / Breadcrumb de aproximación geográfica (Tierra -> Sudamérica -> Perú -> Piura -> Cuenca) */}
+                  <div className="flex items-center gap-1 overflow-x-auto pb-2 border-b border-slate-800 mb-3 text-[10px] font-mono">
+                    {[
+                      { id: 'earth', label: '1. Tierra' },
+                      { id: 'south_america', label: '2. Sudamérica' },
+                      { id: 'peru', label: '3. Perú' },
+                      { id: 'piura', label: '4. Piura' },
+                      { id: 'target_basin', label: '5. Cuenca Objetivo' },
+                    ].map((step) => (
                       <button
+                        key={step.id}
                         onClick={() => {
                           soundManager.playClick();
-                          onRoleChange?.('ground');
+                          setGeoStage(step.id as any);
                         }}
-                        className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs rounded shadow"
-                        title="Cambiar control a Base CNOIS"
+                        className={`px-2 py-0.5 rounded transition-all whitespace-nowrap ${
+                          geoStage === step.id
+                            ? 'bg-cyan-500 text-slate-950 font-bold shadow'
+                            : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                        }`}
                       >
-                        🔄 Cambiar a Base CNOIS (1 Clic)
+                        {step.label}
                       </button>
-                    )}
-                    <div className="flex justify-end gap-2 ml-auto">
-                      <button
-                        onClick={handleRequestObservation}
-                        disabled={
-                          role !== 'ground' ||
-                          (snapshot.phase !== 'briefing' && snapshot.phase !== 'review') ||
-                          isDispatching
-                        }
-                        title={role !== 'ground' ? 'Solo la Base CNOIS puede solicitar observaciones' : 'Enviar solicitud al satélite'}
-                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                      >
-                        {role === 'ground'
-                          ? (snapshot.observations.length > 0
-                              ? 'Enviar Solicitud de 2da Zona al Satélite →'
-                              : 'Enviar Solicitud al Satélite →')
-                          : 'Solo la Base puede solicitar'}
-                      </button>
-                    </div>
+                    ))}
                   </div>
+
+                  {/* Etapa 1: Tierra (Órbita Global LEO) */}
+                  {geoStage === 'earth' && (
+                    <div className="space-y-3 animate-fadeIn">
+                      <div className="relative border border-cyan-800/60 bg-slate-950 p-4 rounded-xl flex flex-col items-center justify-center min-h-[200px] overflow-hidden">
+                        <div className="w-36 h-36 rounded-full bg-gradient-to-tr from-blue-950 via-blue-800 to-cyan-700 border-2 border-cyan-400 shadow-[0_0_40px_rgba(7,216,248,0.35)] relative overflow-hidden flex items-center justify-center">
+                          <div className="absolute w-20 h-28 bg-emerald-600/70 rounded-full rotate-12 blur-[1px] translate-x-2 translate-y-1 border border-emerald-400/40" />
+                          <div className="absolute inset-0 bg-white/20 rounded-full mix-blend-overlay animate-pulse" />
+                          <div className="absolute top-3 right-4 flex items-center gap-1 animate-bounce">
+                            <span className="text-xs">🛰️</span>
+                            <span className="text-[7.5px] font-mono text-cyan-300 bg-slate-950/90 px-1 rounded border border-cyan-500/50">
+                              PerúSAT-1 (SSO)
+                            </span>
+                          </div>
+                        </div>
+                        <div className="absolute w-56 h-56 rounded-full border border-dashed border-cyan-500/40 pointer-events-none rotate-45" />
+                      </div>
+                      <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-xs font-mono space-y-1">
+                        <div className="text-cyan-400 font-bold">1. ÓRBITA GLOBAL LEO · ALTITUD 673 KM (SSO)</div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          Vigilancia remota del Pacífico oriental. El sensor óptico NAOMI y la Base CNOIS inician el monitoreo
+                          satelital ante anomalías de temperatura marina asociadas al Fenómeno de El Niño.
+                        </p>
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('south_america');
+                          }}
+                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                        >
+                          Avanzar a Continente Sudamericano →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Etapa 2: Sudamérica */}
+                  {geoStage === 'south_america' && (
+                    <div className="space-y-3 animate-fadeIn">
+                      <div className="relative border border-cyan-800/60 bg-slate-950 p-4 rounded-xl flex flex-col items-center justify-center min-h-[200px] overflow-hidden">
+                        <div className="w-44 h-48 bg-slate-900 border border-cyan-600/50 rounded-2xl relative p-3 flex items-center justify-center overflow-hidden">
+                          <div className="absolute inset-0 bg-gradient-to-b from-emerald-950/30 via-emerald-900/20 to-blue-950/50" />
+                          <div className="absolute left-6 top-6 bottom-6 w-3 bg-amber-900/40 border-r border-amber-500/40 transform -skew-x-6" />
+                          <div className="absolute left-10 top-16 flex items-center gap-1.5">
+                            <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping" />
+                            <span className="text-[9px] font-mono font-bold text-cyan-300 bg-slate-950/90 px-1.5 py-0.5 rounded border border-cyan-500">
+                              PERÚ
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-xs font-mono space-y-1">
+                        <div className="text-cyan-400 font-bold">2. CONTINENTE SUDAMERICANO · FRENTE ITCZ</div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          La Zona de Convergencia Intertropical (ITCZ) desplaza masas húmedas hacia la vertiente occidental
+                          de los Andes. Riesgo de lluvias torrenciales en la cuenca del Pacífico.
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('earth');
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded border border-slate-700"
+                        >
+                          ← Volver a Tierra
+                        </button>
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('peru');
+                          }}
+                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                        >
+                          Avanzar a Territorio Peruano →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Etapa 3: Perú */}
+                  {geoStage === 'peru' && (
+                    <div className="space-y-3 animate-fadeIn">
+                      <div className="relative border border-cyan-800/60 bg-slate-950 p-3 rounded-xl flex flex-col items-center justify-center min-h-[200px] overflow-hidden">
+                        <svg viewBox="0 0 200 220" className="w-48 h-48 text-cyan-400 fill-cyan-950/30 stroke-current stroke-2">
+                          <polygon points="40,25 75,18 120,35 155,75 140,130 150,175 115,200 75,185 45,150 28,100 28,55" />
+                          <path d="M 40,25 Q 28,75 45,150 Q 75,185 115,200" fill="none" stroke="#ffb02e" strokeWidth="2.5" />
+                        </svg>
+                        <div className="absolute left-16 top-10 flex items-center gap-1.5">
+                          <span className="w-3 h-3 rounded-full bg-amber-500 animate-ping" />
+                          <span className="text-[9px] font-mono font-bold text-amber-300 bg-slate-950/90 px-1.5 py-0.5 rounded border border-amber-500">
+                            📍 ZONA ALERTA (PIURA)
+                          </span>
+                        </div>
+                        <div className="absolute left-24 top-28 flex items-center gap-1">
+                          <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                          <span className="text-[8px] font-mono text-cyan-200 bg-slate-950/90 px-1 rounded">
+                            CNOIS (Pucusana)
+                          </span>
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-xs font-mono space-y-1">
+                        <div className="text-cyan-400 font-bold">3. REPÚBLICA DEL PERÚ · COBERTURA CNOIS</div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          El Centro CNOIS activa el protocolo de emergencia por inundaciones en la costa norte. Cobertura
+                          del territorio nacional y programación de ventana de pase sobre Piura.
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('south_america');
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded border border-slate-700"
+                        >
+                          ← Volver a Sudamérica
+                        </button>
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('piura');
+                          }}
+                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                        >
+                          Focalizar Departamento de Piura →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Etapa 4: Piura */}
+                  {geoStage === 'piura' && (
+                    <div className="space-y-3 animate-fadeIn">
+                      <div className="relative border border-amber-600/60 bg-slate-950 p-4 rounded-xl flex flex-col items-center justify-center min-h-[200px] overflow-hidden">
+                        <div className="w-full h-40 bg-slate-900 rounded-lg border border-cyan-800/80 relative overflow-hidden p-3 flex flex-col justify-between">
+                          <div className="flex items-center justify-between text-[10px] font-mono">
+                            <span className="text-amber-400 font-bold">DEPARTAMENTO DE PIURA · COSTA NORTE</span>
+                            <span className="text-slate-400">ALERTA ROJA INDECI</span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 my-1">
+                            <div className="p-2 bg-slate-950/80 rounded border border-cyan-700 font-mono text-[10px]">
+                              <div className="text-cyan-400 font-bold">Valle del Río Chira</div>
+                              <div className="text-slate-400">Sullana · Terrazas Agrícolas</div>
+                            </div>
+                            <div className="p-2 bg-slate-950/80 rounded border border-amber-600 font-mono text-[10px]">
+                              <div className="text-amber-400 font-bold">Cuenca del Río Piura</div>
+                              <div className="text-slate-400">Catacaos · Puente Sánchez Cerro</div>
+                            </div>
+                          </div>
+                          <div className="text-[9.5px] font-mono text-slate-400">
+                            Precipitación acumulada estimada por NASA GPM/IMERG: &gt;120 mm en 24h.
+                          </div>
+                        </div>
+                      </div>
+                      <div className="bg-slate-900/90 border border-slate-800 p-2.5 rounded-lg text-xs font-mono space-y-1">
+                        <div className="text-amber-400 font-bold">4. DEPARTAMENTO DE PIURA · CUENCAS EN VULNERABILIDAD</div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed">
+                          La cuenca baja del río Piura y los valles del río Chira presentan riesgo inminente de desborde.
+                          El protocolo exige seleccionar la cuenca prioritaria para adquisición óptica submétrica.
+                        </p>
+                      </div>
+                      <div className="flex justify-between items-center pt-1">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('peru');
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded border border-slate-700"
+                        >
+                          ← Volver a Perú
+                        </button>
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('target_basin');
+                          }}
+                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                        >
+                          Seleccionar Cuenca Objetivo →
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Etapa 5: Cuenca Fluvial Objetivo & Solicitud */}
+                  {geoStage === 'target_basin' && (
+                    <div className="animate-fadeIn">
+                      <div className="text-xs text-slate-300 mb-2 font-mono">
+                        Selecciona el río prioritario para monitoreo de crecida:
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 mb-3">
+                        <button
+                          onClick={() => {
+                            setSelectedProvince('piura');
+                            setSelectedTarget('rio-piura');
+                          }}
+                          className={`px-3 py-1.5 text-xs font-mono font-bold rounded border ${
+                            selectedProvince === 'piura'
+                              ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Provincia de Piura {snapshot.observations.some((o) => o.targetId === 'rio-piura' || o.targetId === 'piura-rio') ? '✓' : ''}
+                        </button>
+                        <button
+                          onClick={() => {
+                            setSelectedProvince('sullana');
+                            setSelectedTarget('rio-chira');
+                          }}
+                          className={`px-3 py-1.5 text-xs font-mono font-bold rounded border ${
+                            selectedProvince === 'sullana'
+                              ? 'bg-cyan-500 text-slate-950 border-cyan-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Provincia de Sullana {snapshot.observations.some((o) => o.targetId === 'rio-chira' || o.targetId === 'piura-urbano') ? '✓' : ''}
+                        </button>
+                      </div>
+
+                      {/* Canvas esquemático de mapa */}
+                      <div className="border border-slate-700 bg-slate-950 p-1 rounded mb-3">
+                        <canvas
+                          ref={(canvas) => {
+                            if (canvas) {
+                              const ctx = canvas.getContext('2d');
+                              if (ctx) {
+                                drawPeruMap(ctx, 320, 120, selectedTarget, scenarioMode === 'emergency');
+                              }
+                            }
+                          }}
+                          width={320}
+                          height={120}
+                          className="w-full h-auto rounded block"
+                        />
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs bg-slate-900/80 p-2 rounded border border-slate-800 mb-4 font-mono">
+                        <span className="text-slate-400">Objetivo seleccionado:</span>
+                        <span className="text-cyan-400 font-bold">
+                          {selectedTarget === 'rio-piura' ? 'Río Piura' : 'Río Chira'}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setGeoStage('piura');
+                          }}
+                          className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-mono text-xs rounded border border-slate-700"
+                        >
+                          ← Volver a Piura
+                        </button>
+
+                        {!isMultiplayer && role !== 'ground' && (
+                          <button
+                            onClick={() => {
+                              soundManager.playClick();
+                              onRoleChange?.('ground');
+                            }}
+                            className="px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white font-mono font-bold text-xs rounded shadow"
+                            title="Cambiar control a Base CNOIS"
+                          >
+                            🔄 Cambiar a Base CNOIS (1 Clic)
+                          </button>
+                        )}
+                        <div className="flex justify-end gap-2 ml-auto">
+                          <button
+                            onClick={handleRequestObservation}
+                            disabled={
+                              role !== 'ground' ||
+                              (snapshot.phase !== 'briefing' && snapshot.phase !== 'review') ||
+                              isDispatching
+                            }
+                            title={role !== 'ground' ? 'Solo la Base CNOIS puede solicitar observaciones' : 'Enviar solicitud al satélite'}
+                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            {role === 'ground'
+                              ? (snapshot.observations.length > 0
+                                  ? 'Enviar Solicitud de 2da Zona al Satélite →'
+                                  : 'Enviar Solicitud al Satélite →')
+                              : 'Solo la Base puede solicitar'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1336,6 +1571,228 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                       />
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Modal Sala Briefing: Fundamentos Científicos NASA IMERG & Protocolo */}
+              {activeModal === 'briefing' && (
+                <div className="space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div>
+                      <div className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
+                        Sala 03 · Mesa Táctica de Briefing Científico
+                      </div>
+                      <h3 className="text-sm font-bold text-white">Simulación NASA GPM/IMERG & Operaciones PerúSAT-1</h3>
+                    </div>
+                    <span className="text-[10px] bg-cyan-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
+                      NASA Space Apps 2026
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl space-y-2">
+                    <div className="text-cyan-300 font-bold flex items-center gap-1.5">
+                      <span>🛰️</span>
+                      <span>Contexto Operativo: Fenómeno de El Niño Costero</span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      El calentamiento anómalo del mar frente a la costa norte peruana genera frentes convectivos de alta intensidad.
+                      La constelación multisatélite NASA GPM / IMERG V07 detecta tasas de precipitación superiores a 40 mm/h.
+                      Esta información orienta la prioridad espacial pero requiere verificación óptica submétrica de PerúSAT-1.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10.5px]">
+                    <div className="p-2.5 bg-slate-950 rounded-lg border border-cyan-700/60">
+                      <div className="text-cyan-400 font-bold mb-1">🎮 Operador de Tierra (Base CNOIS)</div>
+                      <ul className="list-disc list-inside text-slate-300 space-y-1">
+                        <li>Focaliza la cuenca en la consola cartográfica.</li>
+                        <li>Autoriza enlace de telemetría a Punta Hermosa.</li>
+                        <li>Fotointerpreta la escena y emite el dictamen al COEN.</li>
+                      </ul>
+                    </div>
+                    <div className="p-2.5 bg-slate-950 rounded-lg border border-amber-600/60">
+                      <div className="text-amber-400 font-bold mb-1">🛰️ Operador de Satélite (PerúSAT-1)</div>
+                      <ul className="list-disc list-inside text-slate-300 space-y-1">
+                        <li>Calibra la resolución del sensor NAOMI (0.7m Pan / 2.8m MS).</li>
+                        <li>Alinea la mira orbital y dispara en la ventana de pase.</li>
+                        <li>Sintoniza la frecuencia 8.2 GHz (Banda X) a 4 Mb/s.</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end pt-2">
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal(null);
+                      }}
+                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded shadow"
+                    >
+                      Entendido · Volver a la Base
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Modal Sala Debrief: Certificación Final */}
+              {activeModal === 'debrief' && (
+                <div className="space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div>
+                      <div className="text-[11px] text-emerald-400 font-bold uppercase tracking-wider">
+                        Sala 04 · Consola de Certificación Final
+                      </div>
+                      <h3 className="text-sm font-bold text-white">Evaluación y Balance de Misión</h3>
+                    </div>
+                    <span className="text-[10px] bg-emerald-950 text-emerald-300 px-2 py-0.5 rounded border border-emerald-800">
+                      {snapshot.phase === 'debrief' ? 'Misión Concluida' : 'En Progreso'}
+                    </span>
+                  </div>
+
+                  {snapshot.phase === 'debrief' ? (
+                    <div>
+                      <FinalMissionReport
+                        snapshot={snapshot}
+                        finding={selectedFinding}
+                        appliedEvents={gateway.getAppliedEvents ? gateway.getAppliedEvents(snapshot.roomId) : []}
+                      />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div className="bg-slate-900/90 border border-slate-800 p-3 rounded-xl space-y-2">
+                        <div className="text-amber-400 font-bold">Estado Preliminar de Operaciones</div>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-center text-[10px]">
+                          <div className="p-2 bg-slate-950 rounded border border-slate-800">
+                            <div className="text-slate-400">Fase</div>
+                            <div className="text-cyan-400 font-bold uppercase">{snapshot.phase}</div>
+                          </div>
+                          <div className="p-2 bg-slate-950 rounded border border-slate-800">
+                            <div className="text-slate-400">Evidencias</div>
+                            <div className="text-emerald-400 font-bold">{usefulEvidence} / {requiredEvidence}</div>
+                          </div>
+                          <div className="p-2 bg-slate-950 rounded border border-slate-800">
+                            <div className="text-slate-400">Batería</div>
+                            <div className="text-cyan-400 font-bold">{snapshot.resources.energyWh} Wh</div>
+                          </div>
+                          <div className="p-2 bg-slate-950 rounded border border-slate-800">
+                            <div className="text-slate-400">Contacto</div>
+                            <div className="text-amber-400 font-bold">{snapshot.resources.contactSeconds} s</div>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-300 leading-relaxed pt-1">
+                          La certificación final se desbloquea tras completar la adquisición, descarga y análisis oficial
+                          en el Centro de Análisis.
+                        </p>
+                      </div>
+
+                      <div className="flex justify-end pt-1">
+                        <button
+                          onClick={() => {
+                            soundManager.playClick();
+                            setActiveModal(null);
+                          }}
+                          className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded border border-slate-700"
+                        >
+                          Volver a Operaciones
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Modal Lobby Central: Directorio de la Base y Estado */}
+              {activeModal === 'lobby' && (
+                <div className="space-y-3 font-mono text-xs">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <div>
+                      <div className="text-[11px] text-cyan-400 font-bold uppercase tracking-wider">
+                        Lobby Central · Distribuidor de la Base Espacial
+                      </div>
+                      <h3 className="text-sm font-bold text-white">Directorio Operativo CNOIS & PerúSAT-1</h3>
+                    </div>
+                    <span className="text-[10px] bg-slate-950 text-cyan-300 px-2 py-0.5 rounded border border-cyan-800">
+                      5 Salas Interconectadas
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[10.5px]">
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal('base');
+                      }}
+                      className="p-2.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-cyan-700/60 text-left transition-colors"
+                    >
+                      <div className="text-cyan-400 font-bold flex items-center gap-1.5">
+                        <span>▤</span>
+                        <span>Oeste: Base CNOIS (Sala 01)</span>
+                      </div>
+                      <div className="text-slate-400 text-[10px] mt-0.5">
+                        Consola Geográfica · Zoom Tierra a Piura y solicitud de captura.
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal('camera');
+                      }}
+                      className="p-2.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-amber-600/60 text-left transition-colors"
+                    >
+                      <div className="text-amber-400 font-bold flex items-center gap-1.5">
+                        <span>⊙</span>
+                        <span>Este: Enlace Satélite · Óptica (Sala 02)</span>
+                      </div>
+                      <div className="text-slate-400 text-[10px] mt-0.5">
+                        Sensor NAOMI · Calibración, retícula y disparo satelital.
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal('antenna');
+                      }}
+                      className="p-2.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-cyan-700/60 text-left transition-colors"
+                    >
+                      <div className="text-cyan-400 font-bold flex items-center gap-1.5">
+                        <span>⌁</span>
+                        <span>Este: Terminal Banda X (Sala 02)</span>
+                      </div>
+                      <div className="text-slate-400 text-[10px] mt-0.5">
+                        Descarga de imágenes a 8.2 GHz y telemetría a Punta Hermosa.
+                      </div>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal('report');
+                      }}
+                      className="p-2.5 bg-slate-900 hover:bg-slate-800 rounded-lg border border-emerald-600/60 text-left transition-colors"
+                    >
+                      <div className="text-emerald-400 font-bold flex items-center gap-1.5">
+                        <span>≡</span>
+                        <span>Oeste: Centro de Análisis (Sala 01)</span>
+                      </div>
+                      <div className="text-slate-400 text-[10px] mt-0.5">
+                        Clasificación de inundación y dictamen oficial COEN.
+                      </div>
+                    </button>
+                  </div>
+
+                  <div className="flex justify-end pt-1">
+                    <button
+                      onClick={() => {
+                        soundManager.playClick();
+                        setActiveModal(null);
+                      }}
+                      className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs rounded shadow"
+                    >
+                      Continuar Exploración
+                    </button>
+                  </div>
                 </div>
               )}
 
