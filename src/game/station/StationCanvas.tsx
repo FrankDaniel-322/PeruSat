@@ -261,9 +261,33 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     );
   };
 
-  // 4. Transmisión por antena banda X (Satélite)
+  // 4a. Solicitud de transmisión por telemetría (Base)
+  const handleRequestTransmission = () => {
+    const obs = snapshot.observations.find((o) => !o.transmitted) || snapshot.observations[snapshot.observations.length - 1];
+    if (!obs) return;
+
+    soundManager.playClick();
+    void handleDispatch(
+      {
+        actionId: crypto.randomUUID(),
+        actorRole: 'ground',
+        expectedRevision: snapshot.revision,
+        type: 'REQUEST_TRANSMISSION',
+        payload: { observationId: obs.observationId },
+      },
+      `✓ Solicitud de telemetría enviada para ${obs.observationId}.`,
+      {
+        energyDelta: '0 Wh',
+        budgetDelta: '0 cr',
+        contactDelta: `${snapshot.resources.contactSeconds} s`,
+        summary: `Base CNOIS autorizó la descarga de telemetría de ${obs.sizeMb} MB.`,
+      },
+    );
+  };
+
+  // 4b. Transmisión por antena banda X (Satélite)
   const handleTransmitObservation = () => {
-    const obs = snapshot.observations[0];
+    const obs = snapshot.observations.find((o) => !o.transmitted) || snapshot.observations[snapshot.observations.length - 1];
     if (!obs) return;
 
     soundManager.playTransmit();
@@ -288,7 +312,33 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
     );
   };
 
-  // 5. Evaluación de evidencia e informe (Base)
+  // 5a. Clasificación científica de imagen (Base)
+  const handleClassifyImage = () => {
+    const obs = snapshot.observations.find((o) => o.transmitted && !o.finding) || snapshot.observations[snapshot.observations.length - 1];
+    if (!obs) return;
+
+    soundManager.playClick();
+    void handleDispatch(
+      {
+        actionId: crypto.randomUUID(),
+        actorRole: 'ground',
+        expectedRevision: snapshot.revision,
+        type: 'CLASSIFY_IMAGE',
+        payload: { observationId: obs.observationId, finding: selectedFinding },
+      },
+      `✓ Evidencia ${obs.observationId} clasificada como: ${selectedFinding}.`,
+      {
+        energyDelta: `0 Wh`,
+        budgetDelta: `0 cr`,
+        contactDelta: `${snapshot.resources.contactSeconds} s`,
+        summary: selectedFinding === 'insufficient'
+          ? 'Rigor demostrado: declaraste evidencia insuficiente ante limitaciones del sensor.'
+          : 'Clasificación de superficie de agua visible registrada.',
+      },
+    );
+  };
+
+  // 5b. Emisión del informe final (Base)
   const handleEvaluateEvidence = () => {
     soundManager.playClick();
     void handleDispatch(
@@ -299,14 +349,12 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
         type: 'SUBMIT_REPORT',
         payload: { finding: selectedFinding },
       },
-      `✓ Informe simulado emitido con hallazgo: ${selectedFinding}.`,
+      `✓ Informe simulado emitido con dictamen oficial.`,
       {
         energyDelta: `0 Wh`,
         budgetDelta: `0 cr`,
         contactDelta: `${snapshot.resources.contactSeconds} s`,
-        summary: selectedFinding === 'insufficient'
-          ? 'Rigor demostrado: declaraste evidencia insuficiente ante nubosidad visible.'
-          : 'Clasificación registrada con imágenes ópticas disponibles.',
+        summary: 'Misión concluida. Evaluación de decisiones aeroespaciales generada.',
       },
     );
   };
@@ -645,18 +693,32 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <button
-                      onClick={handleTransmitObservation}
-                      disabled={
-                        role !== 'satellite' ||
-                        snapshot.phase !== 'downlink' ||
-                        radioFreq !== 116 ||
-                        snapshot.observations.length === 0
-                      }
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                    >
-                      Transmitir por Antena Banda X 📡
-                    </button>
+                    {snapshot.observations.length > 0 && !snapshot.observations[snapshot.observations.length - 1]?.requested ? (
+                      <button
+                        onClick={handleRequestTransmission}
+                        disabled={role !== 'ground'}
+                        className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                      >
+                        {role === 'ground' ? 'Solicitar Telemetría (Base CNOIS) 📡' : 'Aguardando solicitud de la Base'}
+                      </button>
+                    ) : (
+                      <button
+                        onClick={handleTransmitObservation}
+                        disabled={
+                          role !== 'satellite' ||
+                          radioFreq !== 116 ||
+                          snapshot.observations.length === 0 ||
+                          snapshot.observations[snapshot.observations.length - 1]?.transmitted
+                        }
+                        className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                      >
+                        {snapshot.observations[snapshot.observations.length - 1]?.transmitted
+                          ? '✓ Telemetría Transmitida'
+                          : role === 'satellite'
+                          ? 'Transmitir por Antena Banda X 📡'
+                          : 'Aguardando enlace de Satélite'}
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -710,18 +772,32 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                       </div>
 
                       <div className="flex justify-end gap-2">
-                        <button
-                          onClick={handleEvaluateEvidence}
-                          disabled={role !== 'ground' || snapshot.phase !== 'review'}
-                          className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
-                        >
-                          Registrar y Emitir Informe Simulado →
-                        </button>
+                        {snapshot.observations.some((o) => o.transmitted && !o.finding) ? (
+                          <button
+                            onClick={handleClassifyImage}
+                            disabled={role !== 'ground'}
+                            className="px-4 py-2 bg-cyan-500 hover:bg-cyan-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            {role === 'ground' ? 'Registrar Clasificación Científica 🔬' : 'Solo la Base clasifica'}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={handleEvaluateEvidence}
+                            disabled={role !== 'ground' || snapshot.phase !== 'review'}
+                            className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
+                          >
+                            {role === 'ground' ? 'Emitir Informe Oficial ante COEN →' : 'Solo la Base emite informe'}
+                          </button>
+                        )}
                       </div>
                     </div>
                   ) : (
                     <div>
-                      <FinalMissionReport snapshot={snapshot} finding={selectedFinding} />
+                      <FinalMissionReport
+                        snapshot={snapshot}
+                        finding={selectedFinding}
+                        appliedEvents={gateway.getAppliedEvents(snapshot.roomId)}
+                      />
                     </div>
                   )}
                 </div>

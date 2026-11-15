@@ -1,10 +1,13 @@
 import React from 'react';
 import type { Finding, MissionSnapshot } from '../../contracts/mission';
 import { PERU_REGIONS } from '../maps/PeruRegions';
+import { computeScore } from '../../missions/flood/rules';
+import type { AppliedEvent, FloodSnapshot } from '../../missions/flood/types';
 
 interface FinalMissionReportProps {
   snapshot: MissionSnapshot;
-  finding: Finding;
+  finding?: Finding;
+  appliedEvents?: AppliedEvent[];
   onReset?: () => void;
   onClose?: () => void;
 }
@@ -12,10 +15,12 @@ interface FinalMissionReportProps {
 export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
   snapshot,
   finding,
+  appliedEvents = [],
   onReset,
   onClose,
 }) => {
-  const { resources, observations, roomId } = snapshot;
+  const { observations, roomId } = snapshot;
+  const floodSnap = snapshot as FloodSnapshot;
 
   // Encontrar datos geográficos de contexto
   const targetId = snapshot.selectedTargetId || 'rio-piura';
@@ -23,18 +28,13 @@ export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
   const targetInfo = allTargets.find((t) => t.id === targetId) || allTargets[0];
 
   const nowUtc = new Date().toISOString();
-  const reportId = `REP-PIURA-${roomId.slice(0, 8)}-${Date.now().toString().slice(-4)}`;
+  const reportId = floodSnap.reportId || `REP-PIURA-${roomId.slice(0, 8)}-${Date.now().toString().slice(-4)}`;
+  const effectiveFinding: Finding = floodSnap.reportFinding || finding || 'possible_flood';
 
-  // Cálculo de Puntuación Didáctica según Rúbrica
-  const hasCloudy = observations.some((o) => o.quality === 'cloudy' || o.quality === 'corrupt');
-  const isPrudent = hasCloudy ? finding === 'insufficient' : finding === 'possible_flood';
-
-  const scoreEvidence = isPrudent ? 30 : 10;
-  const scoreEngineering = resources.contactSeconds >= 10 && resources.energyWh >= 20 ? 25 : 15;
-  const scoreCollaboration = 20; // Cumplido el flujo cooperativo de roles
-  const scoreCommunication = observations.every((o) => o.transmitted) ? 15 : 8;
-  const scoreEfficiency = resources.energyWh > 70 ? 10 : 7;
-  const totalScore = scoreEvidence + scoreEngineering + scoreCollaboration + scoreCommunication + scoreEfficiency;
+  // Puntuación oficial calculada por el motor de reglas de Misión A
+  const scoreResult = computeScore(floodSnap, appliedEvents);
+  const { rigor, engineering, collaboration, communication, efficiency } = scoreResult.breakdown;
+  const totalScore = scoreResult.total;
 
   return (
     <div className="bg-slate-900 border-2 border-cyan-400 rounded-2xl p-6 text-slate-100 shadow-2xl max-w-4xl mx-auto my-4 space-y-6">
@@ -145,12 +145,12 @@ export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
           <div className="p-3 bg-slate-900 rounded-lg border border-slate-800 space-y-1.5">
             <div className="text-slate-400 font-bold">Hallazgo Clasificado:</div>
             <div className="text-base font-bold text-cyan-300">
-              {finding === 'possible_flood' && 'POSIBLE AFECTACIÓN POR INUNDACIÓN (Requiere corroboración)'}
-              {finding === 'insufficient' && 'EVIDENCIA INSUFICIENTE (Limitación óptica por nubes)'}
-              {finding === 'normal' && 'CAUCE DENTRO DE NIVELES HABITUALES'}
+              {effectiveFinding === 'possible_flood' && 'POSIBLE AFECTACIÓN POR INUNDACIÓN (Requiere corroboración)'}
+              {effectiveFinding === 'insufficient' && 'EVIDENCIA INSUFICIENTE (Limitación óptica por nubes)'}
+              {effectiveFinding === 'normal' && 'CAUCE DENTRO DE NIVELES HABITUALES'}
             </div>
             <p className="text-slate-300 text-[11px] leading-relaxed pt-1">
-              {finding === 'insufficient'
+              {effectiveFinding === 'insufficient'
                 ? '«Se observó precipitación elevada en el producto satelital consultado. La imagen disponible presenta limitaciones severas por nubosidad. No es posible confirmar extensión de inundación con la evidencia actual. Se recomienda obtener observaciones complementarias y validar con información de campo».'
                 : '«Se identificó ensanchamiento en el espejo de agua sobre zonas agrícolas/urbanas adyacentes al río. Los datos ópticos sugieren vulnerabilidad local, sujeta a confirmación en terreno».'}
             </p>
@@ -177,54 +177,47 @@ export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
       <div className="bg-slate-950 p-4 rounded-xl border border-cyan-800 space-y-3 text-xs">
         <div className="flex items-center justify-between border-b border-slate-800 pb-2">
           <h3 className="font-bold text-cyan-300 uppercase tracking-wider text-[11px]">
-            4. Evaluación de Decisiones de Ingeniería (Rúbrica Didáctica)
+            4. Evaluación de Decisiones de Ingeniería (Rúbrica Didáctica Rol 02)
           </h3>
           <span className="font-mono font-black text-sm text-emerald-400 bg-emerald-950 px-2.5 py-0.5 rounded border border-emerald-800">
             Puntaje: {totalScore} / 100 pts
           </span>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <div className="font-bold text-slate-300">Decisión 1: Tamaño de Archivo vs. Ventana de Contacto</div>
-            <p className="text-slate-400 text-[11px]">
-              {resources.contactSeconds >= 20
-                ? '✓ Excelente balance: seleccionaste un perfil que permitió descargar la imagen antes de que el satélite saliera de la línea de vista de la estación CNOIS.'
-                : '⚠️ Margen estrecho: la descarga consumió casi la totalidad del pase orbital. En misiones críticas, los archivos grandes arriesgan descargas incompletas.'}
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <div className="font-bold text-slate-300">Decisión 2: Rigor Científico y Gestión de Incertidumbre</div>
-            <p className="text-slate-400 text-[11px]">
-              {isPrudent
-                ? '✓ Rigor demostrado: no afirmaste certeza donde la calidad de la imagen no lo permitía. La honestidad técnica es el principio más valorado en ingeniería de emergencias.'
-                : '⚠️ Sobreafirmación: se clasificó un hallazgo definitivo con imágenes afectadas por nubes o artefactos. La regla exige reportar evidencia insuficiente.'}
-            </p>
-          </div>
+        {/* Notas del Motor de Reglas */}
+        <div className="space-y-1.5">
+          <div className="font-bold text-slate-300 text-[11px]">Observaciones del Motor:</div>
+          <ul className="space-y-1 text-slate-400 text-[11px]">
+            {scoreResult.notes.map((note, idx) => (
+              <li key={idx} className="flex items-start gap-1.5">
+                <span className="text-cyan-400">◈</span>
+                <span>{note}</span>
+              </li>
+            ))}
+          </ul>
         </div>
 
-        {/* Desglose de Puntos */}
+        {/* Desglose de Puntos Oficial de Misión A */}
         <div className="grid grid-cols-5 gap-2 pt-2 border-t border-slate-800 text-center font-mono text-[10px]">
           <div className="bg-slate-900 p-1.5 rounded">
-            <span className="text-slate-400 block">Evidencia</span>
-            <strong className="text-cyan-300">{scoreEvidence}/30</strong>
+            <span className="text-slate-400 block">Rigor</span>
+            <strong className="text-cyan-300">{rigor}/30</strong>
           </div>
           <div className="bg-slate-900 p-1.5 rounded">
             <span className="text-slate-400 block">Ingeniería</span>
-            <strong className="text-cyan-300">{scoreEngineering}/25</strong>
+            <strong className="text-cyan-300">{engineering}/25</strong>
           </div>
           <div className="bg-slate-900 p-1.5 rounded">
             <span className="text-slate-400 block">Cooperación</span>
-            <strong className="text-cyan-300">{scoreCollaboration}/20</strong>
+            <strong className="text-cyan-300">{collaboration}/20</strong>
           </div>
           <div className="bg-slate-900 p-1.5 rounded">
             <span className="text-slate-400 block">Transmisión</span>
-            <strong className="text-cyan-300">{scoreCommunication}/15</strong>
+            <strong className="text-cyan-300">{communication}/15</strong>
           </div>
           <div className="bg-slate-900 p-1.5 rounded">
             <span className="text-slate-400 block">Eficiencia</span>
-            <strong className="text-cyan-300">{scoreEfficiency}/10</strong>
+            <strong className="text-cyan-300">{efficiency}/10</strong>
           </div>
         </div>
       </div>

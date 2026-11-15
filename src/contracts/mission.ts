@@ -24,6 +24,8 @@ export interface Observation {
   sourceProvider: SourceProvider;
   sourceUrl?: string;
   transmitted: boolean;
+  requested?: boolean;
+  finding?: Finding;
 }
 
 /** Mission outcome is independent of the current phase (Documento Maestro v3). */
@@ -66,6 +68,6 @@ export type MissionAction = ActionBase & (
   | { type: 'REQUEST_TRANSMISSION'; payload: { observationId: string } }
   | { type: 'TRANSMIT_IMAGE'; payload: { observationId: string } }
   | { type: 'CLASSIFY_IMAGE'; payload: { observationId: string; finding: Finding } }
-  | { type: 'SUBMIT_REPORT'; payload: { finding: Finding } }
-  | { type: 'RESET_MISSION'; payload: Record<string, never> }
+  | { type: 'SUBMIT_REPORT'; payload: { finding?: Finding; reportId?: string } }
+  | { type: 'RESET_MISSION'; payload: { scenarioId?: 'A1' | 'A2' } | Record<string, never> }
 );

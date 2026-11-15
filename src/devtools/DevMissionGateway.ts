@@ -2,7 +2,6 @@ import type {
   MissionAction,
   MissionResources,
   MissionSnapshot,
-  Observation,
   Quality,
 } from '../contracts/mission';
 import { isMissionAction } from '../contracts/validation';
@@ -13,6 +12,17 @@ import {
   type MissionGatewayEvent,
   MissionGatewayError,
 } from '../core/MissionGateway';
+import {
+  applyAction,
+  computeScore,
+  createInitialSnapshot as createFloodSnapshot,
+} from '../missions/flood/rules';
+import type {
+  AppliedEvent,
+  FloodSnapshot,
+  ScenarioId,
+  ScoreResult,
+} from '../missions/flood/types';
 
 export interface DevFaultConfig {
   /** If set, next CAPTURE_IMAGE produces this quality. */
@@ -25,47 +35,31 @@ export interface DevFaultConfig {
   overrideContactSeconds?: number;
   /** Artificial latency in milliseconds before dispatching. */
   simulatedLatencyMs?: number;
+  /** Whether TRANSMIT_IMAGE automatically requests if not requested by Ground */
+  autoRequestTransmission?: boolean;
 }
 
 interface DevRoomState {
-  snapshot: MissionSnapshot;
+  snapshot: FloodSnapshot;
   events: Map<string, { action: string; change: ConfirmedMissionChange }>;
+  appliedEvents: AppliedEvent[];
   listeners: Set<(event: MissionGatewayEvent) => void>;
   connectionState: ConnectionState;
 }
 
 const copy = <T>(value: T): T => structuredClone(value);
 
-export function createInitialSnapshot(roomId: string): MissionSnapshot {
-  const initialResources: MissionResources = {
-    energyWh: 100,
-    storageMb: 70,
-    contactSeconds: 80,
-    budgetCredits: 100,
-    massKg: 450, // Masa fija referencial de PerúSAT-1
-  };
-
-  return {
-    schemaVersion: 3,
-    roomId,
-    missionId: 'flood-piura-01',
-    phase: 'briefing',
-    status: 'ready',
-    revision: 0,
-    resources: initialResources,
-    observations: [],
-  };
+export function createInitialSnapshot(roomId: string, scenarioId: ScenarioId = 'A1'): FloodSnapshot {
+  return createFloodSnapshot(roomId, scenarioId);
 }
 
 /**
- * DevMissionGateway: Simulador de integración autónomo para pruebas de Rol 01.
- * Implementa MissionGateway y ejecuta las transiciones canónicas de Misión A
- * de acuerdo con schemaVersion: 3 del Documento Maestro.
+ * DevMissionGateway: Pasarela de desarrollo e integración respaldada por el motor
+ * de reglas funcional de la Misión A (Rol 02) bajo schemaVersion 3.
  */
 export class DevMissionGateway implements MissionGateway {
   private readonly rooms = new Map<string, DevRoomState>();
   public faultConfig: DevFaultConfig = {};
-  private observationCounter = 0;
 
   private getOrCreateRoom(roomId: string): DevRoomState {
     if (!roomId || !roomId.trim()) {
@@ -74,8 +68,9 @@ export class DevMissionGateway implements MissionGateway {
     let room = this.rooms.get(roomId);
     if (!room) {
       room = {
-        snapshot: createInitialSnapshot(roomId),
+        snapshot: createInitialSnapshot(roomId, 'A1'),
         events: new Map(),
+        appliedEvents: [],
         listeners: new Set(),
         connectionState: 'connected',
       };
@@ -134,8 +129,8 @@ export class DevMissionGateway implements MissionGateway {
       );
     }
 
-    // 3. Aplicación de Reglas de Misión A (Inundaciones en Piura)
-    const nextSnapshot = this.applyActionRules(room.snapshot, action);
+    // 3. Aplicación de Reglas de Misión A (Inundaciones en Piura - Rol 02)
+    const nextSnapshot = this.applyActionRules(room, action);
 
     // 4. Confirmación Atómica del Evento
     const change: ConfirmedMissionChange = {
@@ -192,244 +187,63 @@ export class DevMissionGateway implements MissionGateway {
     }
   }
 
-  private applyActionRules(current: MissionSnapshot, action: MissionAction): MissionSnapshot {
-    const snap = copy(current);
-
-    switch (action.type) {
-      case 'REQUEST_OBSERVATION': {
-        if (action.actorRole !== 'ground') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo la Base CNOIS (ground) puede solicitar una observación.'
-          );
-        }
-        if (snap.phase !== 'briefing') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La solicitud de observación solo puede realizarse en la fase de briefing.'
-          );
-        }
-
-        snap.phase = 'planning';
-        snap.status = 'running';
-        snap.selectedTargetId = action.payload.targetId;
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'APPROVE_PLAN': {
-        if (action.actorRole !== 'satellite') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo el Satélite (satellite) puede aprobar el plan de observación.'
-          );
-        }
-        if (snap.phase !== 'planning') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La aprobación del plan solo es válida en la fase de planning.'
-          );
-        }
-        if (snap.resources.energyWh < 12) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Energía insuficiente para comprometer el plan de observación.'
-          );
-        }
-
-        snap.phase = 'capture';
-        snap.selectedProfileId = action.payload.profileId;
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'CAPTURE_IMAGE': {
-        if (action.actorRole !== 'satellite') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo el Satélite puede ejecutar la captura de imágenes.'
-          );
-        }
-        if (snap.phase !== 'capture') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La captura óptica solo es válida en la fase de capture.'
-          );
-        }
-
-        const energyCost = 12; // Captura consume 12 Wh
-        const imageSizeMb = 14; // Tamaño estándar 14 MB (simulado)
-
-        if (snap.resources.energyWh < energyCost) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Energía insuficiente para realizar la captura. Se requiere recarga solar.'
-          );
-        }
-        if (snap.resources.storageMb < imageSizeMb) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Memoria interna insuficiente para almacenar la nueva captura.'
-          );
-        }
-
-        this.observationCounter += 1;
-        const quality: Quality = this.faultConfig.forcedQuality || 'valid';
-
-        const newObservation: Observation = {
-          observationId: `obs-piura-${this.observationCounter}`,
-          targetId: action.payload.targetId || snap.selectedTargetId || 'rio-piura',
-          quality,
-          sizeMb: imageSizeMb,
-          capturedAtUtc: new Date().toISOString(),
-          isSimulated: true,
-          sourceProvider: 'GAME_SIMULATION',
-          transmitted: false,
-        };
-
-        snap.resources.energyWh -= energyCost;
-        snap.resources.storageMb -= imageSizeMb;
-        snap.observations.push(newObservation);
-        snap.phase = 'downlink';
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'REQUEST_TRANSMISSION': {
-        if (action.actorRole !== 'ground') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo la Base CNOIS puede solicitar la transmisión de un archivo.'
-          );
-        }
-        const obs = snap.observations.find(
-          (o) => o.observationId === action.payload.observationId
-        );
-        if (!obs) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'El archivo de observación solicitado no existe en el satélite.'
-          );
-        }
-        if (obs.transmitted) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La observación ya fue transmitida a Tierra.'
-          );
-        }
-
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'TRANSMIT_IMAGE': {
-        if (action.actorRole !== 'satellite') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo el Satélite puede transmitir imágenes hacia Tierra.'
-          );
-        }
-        if (snap.phase !== 'downlink') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La transmisión solo puede ejecutarse en la fase de downlink.'
-          );
-        }
-
-        const obs = snap.observations.find(
-          (o) => o.observationId === action.payload.observationId
-        );
-        if (!obs) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Observación no encontrada en el inventario del satélite.'
-          );
-        }
-        if (obs.transmitted) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Esta observación ya ha sido transmitida.'
-          );
-        }
-
-        const transmitEnergyCost = 4; // Transmisión consume 4 Wh
-        const requiredSeconds = Math.ceil((obs.sizeMb * 8) / 4); // ~28 s para 14 MB a 4 Mb/s
-
-        if (snap.resources.energyWh < transmitEnergyCost) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Energía insuficiente para alimentar el transmisor de bajada de datos.'
-          );
-        }
-        if (snap.resources.contactSeconds < requiredSeconds) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'La ventana de comunicación física ha terminado antes de completar la descarga.'
-          );
-        }
-
-        snap.resources.energyWh -= transmitEnergyCost;
-        snap.resources.contactSeconds -= requiredSeconds;
-        obs.transmitted = true;
-
-        snap.phase = 'review';
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'CLASSIFY_IMAGE': {
-        if (action.actorRole !== 'ground') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo la Base CNOIS puede clasificar evidencias recibidas.'
-          );
-        }
-        const obs = snap.observations.find(
-          (o) => o.observationId === action.payload.observationId
-        );
-        if (!obs) {
-          throw new MissionGatewayError('INVALID_ACTION', 'Observación no encontrada.');
-        }
-        if (!obs.transmitted) {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'No se puede clasificar una imagen que no ha sido transmitida a Tierra.'
-          );
-        }
-
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'SUBMIT_REPORT': {
-        if (action.actorRole !== 'ground') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'Solo la Base CNOIS puede emitir el informe final de situación.'
-          );
-        }
-        if (snap.phase !== 'review') {
-          throw new MissionGatewayError(
-            'INVALID_ACTION',
-            'El informe de situación solo puede emitirse tras la revisión de evidencias.'
-          );
-        }
-
-        snap.phase = 'debrief';
-        // Local diagnostic outcome only; Role 02 owns final A1/A2 scoring.
-        snap.status = action.payload.finding === 'insufficient' ? 'lost' : 'won';
-        snap.revision += 1;
-        return snap;
-      }
-
-      case 'RESET_MISSION': {
-        const resetSnapshot = createInitialSnapshot(snap.roomId);
-        resetSnapshot.revision = snap.revision + 1;
-        return resetSnapshot;
-      }
-
-      default:
-        throw new MissionGatewayError('NOT_IMPLEMENTED', 'Tipo de acción no soportada');
+  /** Cambia el escenario activo (A1 / A2) reiniciando el snapshot */
+  setScenario(roomId: string, scenarioId: ScenarioId): void {
+    const room = this.getOrCreateRoom(roomId);
+    room.snapshot = createFloodSnapshot(roomId, scenarioId, room.snapshot.revision + 1);
+    const change: ConfirmedMissionChange = {
+      eventId: `evt-scenario-${room.snapshot.revision}`,
+      actionId: `scenario-${Date.now()}`,
+      snapshot: room.snapshot,
+    };
+    for (const listener of room.listeners) {
+      listener({ kind: 'confirmed', change: copy(change) });
     }
+  }
+
+  /** Calcula la puntuación didáctica actual basada en la bitácora validada */
+  getScore(roomId: string): ScoreResult {
+    const room = this.getOrCreateRoom(roomId);
+    return computeScore(room.snapshot, room.appliedEvents);
+  }
+
+  /** Obtiene la lista completa de eventos aplicados */
+  getAppliedEvents(roomId: string): AppliedEvent[] {
+    const room = this.getOrCreateRoom(roomId);
+    return copy(room.appliedEvents);
+  }
+
+  private applyActionRules(room: DevRoomState, action: MissionAction): FloodSnapshot {
+    const snap = copy(room.snapshot);
+
+    // Ajuste dev: si el Satélite transmite y la Base aún no lo había marcado, en dev se asiste
+    if (action.type === 'TRANSMIT_IMAGE' && this.faultConfig.autoRequestTransmission !== false) {
+      const obs = snap.observations.find((o) => o.observationId === action.payload.observationId);
+      if (obs && !obs.requested) {
+        obs.requested = true;
+      }
+    }
+
+    const result = applyAction(snap, action);
+    room.appliedEvents.push(result.event);
+
+    if (!result.ok) {
+      throw new MissionGatewayError(
+        result.code === 'STALE_REVISION' ? 'REVISION_CONFLICT' : 'INVALID_ACTION',
+        result.message
+      );
+    }
+
+    let nextSnap = result.snapshot;
+
+    // Falla forzada de calidad en DevTools
+    if (this.faultConfig.forcedQuality && action.type === 'CAPTURE_IMAGE') {
+      const lastObs = nextSnap.observations[nextSnap.observations.length - 1];
+      if (lastObs) {
+        lastObs.quality = this.faultConfig.forcedQuality;
+      }
+    }
+
+    return nextSnap;
   }
 }

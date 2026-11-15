@@ -25,7 +25,9 @@ export function isObservation(value: unknown): value is Observation {
     && utcIso(value.capturedAtUtc) && typeof value.isSimulated === 'boolean'
     && oneOf(value.sourceProvider, providers)
     && (value.sourceUrl === undefined || text(value.sourceUrl))
-    && typeof value.transmitted === 'boolean';
+    && typeof value.transmitted === 'boolean'
+    && (value.requested === undefined || typeof value.requested === 'boolean')
+    && (value.finding === undefined || oneOf(value.finding, findings));
 }
 
 export function isMissionSnapshot(value: unknown): value is MissionSnapshot {
@@ -55,8 +57,14 @@ export function isMissionAction(value: unknown): value is MissionAction {
     case 'TRANSMIT_IMAGE': return text(value.payload.observationId);
     case 'CLASSIFY_IMAGE': return text(value.payload.observationId)
       && oneOf(value.payload.finding, findings);
-    case 'SUBMIT_REPORT': return oneOf(value.payload.finding, findings);
-    case 'RESET_MISSION': return Object.keys(value.payload).length === 0;
+    case 'SUBMIT_REPORT':
+      return (value.payload.finding === undefined || oneOf(value.payload.finding, findings))
+        && (value.payload.reportId === undefined || text(value.payload.reportId))
+        && (value.payload.finding !== undefined || value.payload.reportId !== undefined);
+    case 'RESET_MISSION':
+      return Object.keys(value.payload).length === 0
+        || value.payload.scenarioId === 'A1'
+        || value.payload.scenarioId === 'A2';
     default: return false;
   }
 }

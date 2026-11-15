@@ -38,7 +38,7 @@ export const PeruSatGameApp: React.FC = () => {
       actorRole: role,
       expectedRevision: snapshot.revision,
       type: 'RESET_MISSION',
-      payload: {},
+      payload: { scenarioId: scenarioMode === 'emergency' ? 'A2' : 'A1' },
     });
     setActiveTab('game');
   };
@@ -142,7 +142,9 @@ export const PeruSatGameApp: React.FC = () => {
             value={scenarioMode}
             onChange={(e) => {
               soundManager.playClick();
-              setScenarioMode(e.target.value as 'routine' | 'emergency');
+              const mode = e.target.value as 'routine' | 'emergency';
+              setScenarioMode(mode);
+              gateway.setScenario(roomId, mode === 'emergency' ? 'A2' : 'A1');
             }}
             className="bg-slate-950 text-slate-300 border border-slate-700 rounded px-2 py-1 text-xs"
           >
@@ -241,6 +243,7 @@ export const PeruSatGameApp: React.FC = () => {
           <FinalMissionReport
             snapshot={snapshot}
             finding={currentFinding}
+            appliedEvents={gateway.getAppliedEvents(snapshot.roomId)}
             onReset={handleResetMission}
             onClose={() => setActiveTab('game')}
           />

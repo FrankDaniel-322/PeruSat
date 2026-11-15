@@ -52,7 +52,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { targetId: 'rio-piura' },
     };
     const res3 = await gateway.dispatch(roomId, action3);
-    expect(res3.snapshot.phase).toBe('downlink');
+    expect(res3.snapshot.phase).toBe('capture');
     expect(res3.snapshot.resources.energyWh).toBe(88); // 100 - 12
     expect(res3.snapshot.resources.storageMb).toBe(56); // 70 - 14
     expect(res3.snapshot.observations.length).toBe(1);
@@ -71,6 +71,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { observationId: obsId },
     };
     const res4 = await gateway.dispatch(roomId, action4);
+    expect(res4.snapshot.phase).toBe('downlink');
     expect(res4.snapshot.revision).toBe(4);
 
     // 5. Satélite transmite imagen
@@ -82,7 +83,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { observationId: obsId },
     };
     const res5 = await gateway.dispatch(roomId, action5);
-    expect(res5.snapshot.phase).toBe('review');
+    expect(res5.snapshot.phase).toBe('downlink');
     expect(res5.snapshot.resources.energyWh).toBe(84); // 88 - 4
     expect(res5.snapshot.resources.contactSeconds).toBe(52); // 80 - 28
     expect(res5.snapshot.observations[0].transmitted).toBe(true);
@@ -97,20 +98,82 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { observationId: obsId, finding: 'possible_flood' },
     };
     const res6 = await gateway.dispatch(roomId, action6);
+    expect(res6.snapshot.phase).toBe('review');
     expect(res6.snapshot.revision).toBe(6);
 
-    // 7. Base emite informe final
+    // 7. Base solicita segunda observación (A1 requiere 2 evidencias útiles)
     const action7: MissionAction = {
-      actionId: 'act-sub-rep',
+      actionId: 'act-req-obs-2',
       actorRole: 'ground',
       expectedRevision: 6,
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'rio-chira' },
+    };
+    await gateway.dispatch(roomId, action7);
+
+    // 8. Satélite aprueba plan
+    const action8: MissionAction = {
+      actionId: 'act-app-plan-2',
+      actorRole: 'satellite',
+      expectedRevision: 7,
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'standard' },
+    };
+    await gateway.dispatch(roomId, action8);
+
+    // 9. Satélite captura segunda imagen
+    const action9: MissionAction = {
+      actionId: 'act-cap-img-2',
+      actorRole: 'satellite',
+      expectedRevision: 8,
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'rio-chira' },
+    };
+    const res9 = await gateway.dispatch(roomId, action9);
+    const obsId2 = res9.snapshot.observations[1].observationId;
+
+    // 10. Base solicita transmisión
+    const action10: MissionAction = {
+      actionId: 'act-req-tx-2',
+      actorRole: 'ground',
+      expectedRevision: 9,
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obsId2 },
+    };
+    await gateway.dispatch(roomId, action10);
+
+    // 11. Satélite transmite segunda imagen
+    const action11: MissionAction = {
+      actionId: 'act-tx-img-2',
+      actorRole: 'satellite',
+      expectedRevision: 10,
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obsId2 },
+    };
+    await gateway.dispatch(roomId, action11);
+
+    // 12. Base clasifica segunda imagen
+    const action12: MissionAction = {
+      actionId: 'act-class-img-2',
+      actorRole: 'ground',
+      expectedRevision: 11,
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obsId2, finding: 'normal' },
+    };
+    await gateway.dispatch(roomId, action12);
+
+    // 13. Base emite informe final
+    const action13: MissionAction = {
+      actionId: 'act-sub-rep',
+      actorRole: 'ground',
+      expectedRevision: 12,
       type: 'SUBMIT_REPORT',
       payload: { finding: 'possible_flood' },
     };
-    const res7 = await gateway.dispatch(roomId, action7);
-    expect(res7.snapshot.phase).toBe('debrief');
-    expect(res7.snapshot.status).toBe('won');
-    expect(res7.snapshot.revision).toBe(7);
+    const res13 = await gateway.dispatch(roomId, action13);
+    expect(res13.snapshot.phase).toBe('debrief');
+    expect(res13.snapshot.status).toBe('won');
+    expect(res13.snapshot.revision).toBe(13);
   });
 
   it('Escenario A2: Incidente simulado de nubosidad y reporte prudente', async () => {
