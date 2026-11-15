@@ -14,10 +14,10 @@ interface StationLocation {
 }
 
 const WORLD_STATIONS: StationLocation[] = [
-  { id: 'base', name: 'Base CNOIS', icon: '▤', x: 80, y: 112, color: 0x07d8f8, room: 'cnois_ops' },
-  { id: 'report', name: 'Centro Análisis', icon: '≡', x: 200, y: 112, color: 0x07d8f8, room: 'cnois_ops' },
-  { id: 'camera', name: 'Mesa Óptica NAOMI', icon: '⊙', x: 100, y: 112, color: 0x07d8f8, room: 'payload_link' },
-  { id: 'antenna', name: 'Terminal Banda X', icon: '⌁', x: 220, y: 112, color: 0xffb02e, room: 'payload_link' },
+  { id: 'base', name: 'Base CNOIS', icon: '▤', x: 80, y: 118, color: 0x07d8f8, room: 'cnois_ops' },
+  { id: 'report', name: 'Centro Análisis', icon: '≡', x: 235, y: 118, color: 0x07d8f8, room: 'cnois_ops' },
+  { id: 'camera', name: 'Mesa Óptica NAOMI', icon: '⊙', x: 80, y: 118, color: 0x07d8f8, room: 'payload_link' },
+  { id: 'antenna', name: 'Terminal Banda X', icon: '⌁', x: 235, y: 118, color: 0xffb02e, room: 'payload_link' },
 ];
 
 export class ExplorableWorldScene extends Scene {
@@ -55,7 +55,12 @@ export class ExplorableWorldScene extends Scene {
   }
 
   preload(): void {
-    // Si cabina o iconos están disponibles
+    // Fondos ilustrados de salas (Rol 05)
+    this.load.image('room_base_cnois', '/assets/rooms/base-cnois.png');
+    this.load.image('room_satellite', '/assets/rooms/satellite.png');
+    this.load.image('room_briefing', '/assets/rooms/briefing.png');
+    this.load.image('room_debrief', '/assets/rooms/debrief.png');
+    this.load.image('room_lobby', '/assets/rooms/lobby.png');
     this.load.image('cabina', '/assets/cabina.png');
   }
 
@@ -120,114 +125,69 @@ export class ExplorableWorldScene extends Scene {
     this.roomContainer.removeAll(true);
 
     const isCnois = this.currentRoom === 'cnois_ops';
+    const bgKey = isCnois ? 'room_base_cnois' : 'room_satellite';
 
-    // Suelo de cuadrícula pixel art
-    const floor = this.add.graphics();
-    floor.fillStyle(isCnois ? 0x021c4a : 0x062b63, 1);
-    floor.fillRect(0, 0, 320, 180);
+    if (this.textures.exists(bgKey)) {
+      // 1. Fondo ilustrado oficial de Rol 05 a escala 16:9 pixel art
+      const bg = this.add.image(160, 90, bgKey);
+      bg.setDisplaySize(320, 180);
+      this.roomContainer.add(bg);
 
-    // Baldosas de piso
-    floor.lineStyle(1, isCnois ? 0x06387d : 0x0c3a80, 0.4);
-    for (let x = 0; x < 320; x += 16) {
-      floor.lineBetween(x, 70, x, 180);
-    }
-    for (let y = 70; y < 180; y += 16) {
-      floor.lineBetween(0, y, 320, y);
-    }
-
-    // Pared superior con paneles metálicos y molduras
-    const wall = this.add.graphics();
-    wall.fillStyle(0x01143b, 1);
-    wall.fillRect(0, 0, 320, 70);
-    wall.lineStyle(2, 0x135dbd, 1);
-    wall.lineBetween(0, 70, 320, 70);
-
-    // Decoración de pared según habitación
-    if (isCnois) {
-      // Pantalla central de mapa del Perú / Piura
-      const mapFrame = this.add.rectangle(160, 35, 110, 42, 0x062b63);
-      mapFrame.setStrokeStyle(1.5, 0x07d8f8);
-      const mapTitle = this.add.text(160, 18, 'CNOIS · RADAR PIURA', {
-        fontFamily: 'monospace',
-        fontSize: '6px',
-        color: '#07d8f8',
-      }).setOrigin(0.5);
-
-      // Líneas esquemáticas del río en la pantalla
-      const mapLines = this.add.graphics();
-      mapLines.lineStyle(1.5, 0x0c91e3, 0.9);
-      mapLines.lineBetween(130, 42, 160, 34);
-      mapLines.lineBetween(160, 34, 190, 44);
-      mapLines.fillStyle(0xffb02e, 1);
-      mapLines.fillCircle(160, 34, 2); // Punto Piura
-
-      // Servidores en racks a la izquierda y derecha
-      const rack1 = this.add.rectangle(40, 35, 36, 46, 0x021c4a);
-      rack1.setStrokeStyle(1, 0x135dbd);
-      const rack2 = this.add.rectangle(280, 35, 36, 46, 0x021c4a);
-      rack2.setStrokeStyle(1, 0x135dbd);
-
-      // LEDs parpadeantes en los racks
-      for (let i = 0; i < 4; i++) {
-        const led1 = this.add.circle(30 + (i % 2) * 12, 22 + Math.floor(i / 2) * 12, 1.5, 0x07d8f8, 0.8);
-        const led2 = this.add.circle(270 + (i % 2) * 12, 22 + Math.floor(i / 2) * 12, 1.5, 0x10b981, 0.8);
-        this.tweens.add({
-          targets: [led1, led2],
-          alpha: { from: 0.2, to: 1 },
-          duration: 400 + i * 200,
-          yoyo: true,
-          repeat: -1,
-        });
-        this.roomContainer.add([led1, led2]);
-      }
-
-      // Nombre de la sala
-      const roomBadge = this.add.text(12, 8, 'SALA 01: CENTRO DE OPERACIONES CNOIS', {
-        fontFamily: 'monospace',
-        fontSize: '7px',
-        color: '#a0c5eb',
-      });
-
-      // Michi Guía en el centro junto a la pantalla
-      this.drawCat(135, 62);
-
-      // Puerta hacia Sala 02 (Pared Derecha)
-      this.drawDoor(312, 110, 'right', 'PUERTA → SALA DE CARGA');
-
-      this.roomContainer.add([floor, wall, mapFrame, mapTitle, mapLines, rack1, rack2, roomBadge]);
+      // Velo ambiental para nitidez de personajes y HUD
+      const overlay = this.add.rectangle(160, 90, 320, 180, 0x01143b, 0.1);
+      this.roomContainer.add(overlay);
     } else {
-      // SALA 02: Sala de Carga Útil y Enlace Satelital
-      const satFrame = this.add.rectangle(160, 35, 120, 44, 0x021c4a);
-      satFrame.setStrokeStyle(1.5, 0xffb02e);
-      const satTitle = this.add.text(160, 18, 'TELEMETRÍA PERÚSAT-1 · BANDA X', {
-        fontFamily: 'monospace',
-        fontSize: '6px',
-        color: '#ffb02e',
-      }).setOrigin(0.5);
-
-      // Onda senoidal de frecuencia satelital en la pantalla
-      const wave = this.add.graphics();
-      wave.lineStyle(1.5, 0xffb02e, 0.85);
-      for (let i = 0; i < 70; i += 3) {
-        wave.lineBetween(125 + i, 38 + Math.sin(i * 0.2) * 5, 125 + i + 2, 38 + Math.sin((i + 2) * 0.2) * 5);
+      // Fallback procedimental en caso de que aún no cargue la textura
+      const floor = this.add.graphics();
+      floor.fillStyle(isCnois ? 0x021c4a : 0x062b63, 1);
+      floor.fillRect(0, 0, 320, 180);
+      floor.lineStyle(1, isCnois ? 0x06387d : 0x0c3a80, 0.4);
+      for (let x = 0; x < 320; x += 16) {
+        floor.lineBetween(x, 70, x, 180);
+      }
+      for (let y = 70; y < 180; y += 16) {
+        floor.lineBetween(0, y, 320, y);
       }
 
-      // Banco de óptica a la izquierda y antena a la derecha
-      const bay1 = this.add.rectangle(40, 35, 36, 46, 0x062b63);
-      bay1.setStrokeStyle(1, 0x07d8f8);
-      const bay2 = this.add.rectangle(280, 35, 36, 46, 0x062b63);
-      bay2.setStrokeStyle(1, 0xffb02e);
+      const wall = this.add.graphics();
+      wall.fillStyle(0x01143b, 1);
+      wall.fillRect(0, 0, 320, 70);
+      wall.lineStyle(2, 0x135dbd, 1);
+      wall.lineBetween(0, 70, 320, 70);
+      this.roomContainer.add([floor, wall]);
+    }
 
-      const roomBadge = this.add.text(12, 8, 'SALA 02: CARGA ÚTIL & ENLACE BANDA X', {
+    if (isCnois) {
+      // Nombre de la sala e indicador de puerta
+      const roomBadge = this.add.text(10, 8, 'SALA 01: CENTRO CNOIS · OPERACIONES TERRESTRES', {
         fontFamily: 'monospace',
-        fontSize: '7px',
-        color: '#ffb02e',
+        fontSize: '6.5px',
+        color: '#a0c5eb',
+        backgroundColor: '#01143bcc',
+        padding: { x: 4, y: 2 },
       });
 
-      // Puerta hacia Sala 01 (Pared Izquierda)
-      this.drawDoor(8, 110, 'left', '← PUERTA CENTRO CNOIS');
+      // Michi Guía junto al radar central
+      this.drawCat(160, 88);
 
-      this.roomContainer.add([floor, wall, satFrame, satTitle, wave, bay1, bay2, roomBadge]);
+      // Puerta hacia Sala 02 (Pared Este / Derecha)
+      this.drawDoor(312, 110, 'right', 'PUERTA ESTE → SALA SATÉLITE');
+
+      this.roomContainer.add(roomBadge);
+    } else {
+      // Nombre de la sala e indicador de puerta
+      const roomBadge = this.add.text(10, 8, 'SALA 02: ENLACE SATÉLITE · BANDA X & ÓPTICA', {
+        fontFamily: 'monospace',
+        fontSize: '6.5px',
+        color: '#ffb02e',
+        backgroundColor: '#01143bcc',
+        padding: { x: 4, y: 2 },
+      });
+
+      // Puerta hacia Sala 01 (Pared Oeste / Izquierda)
+      this.drawDoor(8, 110, 'left', '← PUERTA OESTE · BASE CNOIS');
+
+      this.roomContainer.add(roomBadge);
     }
 
     // Dibujar las consolas de la habitación actual
@@ -240,24 +200,24 @@ export class ExplorableWorldScene extends Scene {
   private drawDoor(x: number, y: number, side: 'left' | 'right', label: string): void {
     if (!this.roomContainer) return;
 
-    const doorFrame = this.add.rectangle(x, y, 16, 42, 0x062b63);
+    const doorFrame = this.add.rectangle(x, y, 16, 44, 0x062b63, 0.75);
     doorFrame.setStrokeStyle(1.5, side === 'right' ? 0x07d8f8 : 0xffb02e);
 
-    const doorLight = this.add.rectangle(x, y - 24, 18, 5, 0x10b981);
+    const doorLight = this.add.rectangle(x, y - 25, 18, 5, 0x10b981);
     this.tweens.add({
       targets: doorLight,
-      alpha: { from: 0.4, to: 1 },
+      alpha: { from: 0.35, to: 1 },
       duration: 600,
       yoyo: true,
       repeat: -1,
     });
 
-    const doorText = this.add.text(side === 'right' ? x - 40 : x + 16, y - 28, label, {
+    const doorText = this.add.text(side === 'right' ? x - 46 : x + 16, y - 29, label, {
       fontFamily: 'monospace',
       fontSize: '5.5px',
       color: '#f6f5e4',
       backgroundColor: '#01143bdd',
-      padding: { x: 2, y: 1 },
+      padding: { x: 3, y: 1 },
     });
 
     this.roomContainer.add([doorFrame, doorLight, doorText]);
@@ -286,6 +246,8 @@ export class ExplorableWorldScene extends Scene {
       fontFamily: 'monospace',
       fontSize: '5px',
       color: '#f6f5e4',
+      backgroundColor: '#01143bcc',
+      padding: { x: 2, y: 1 },
     }).setOrigin(0.5);
 
     // Animación de cola
@@ -303,12 +265,12 @@ export class ExplorableWorldScene extends Scene {
   private drawConsole(station: StationLocation): void {
     if (!this.roomContainer) return;
 
-    // Mesa de consola
-    const table = this.add.rectangle(station.x, station.y, 44, 26, 0x021c4a);
+    // Mesa de consola holográfica translúcida
+    const table = this.add.rectangle(station.x, station.y, 44, 24, 0x01143b, 0.82);
     table.setStrokeStyle(1.5, station.color);
 
     // Monitor sobre la mesa
-    const monitor = this.add.rectangle(station.x, station.y - 7, 26, 14, 0x062b63);
+    const monitor = this.add.rectangle(station.x, station.y - 7, 24, 12, 0x062b63, 0.9);
     monitor.setStrokeStyle(1, station.color);
 
     // Ícono en pantalla
@@ -319,15 +281,17 @@ export class ExplorableWorldScene extends Scene {
     }).setOrigin(0.5);
 
     // Etiqueta permanente legible
-    const label = this.add.text(station.x, station.y + 7, station.name, {
+    const label = this.add.text(station.x, station.y + 6, station.name, {
       fontFamily: 'monospace',
-      fontSize: '6px',
+      fontSize: '5.5px',
       color: '#a0c5eb',
+      backgroundColor: '#01143baa',
+      padding: { x: 2, y: 1 },
     }).setOrigin(0.5);
 
     // Baliza de pulso si es la consola activa
-    const ping = this.add.circle(station.x, station.y - 17, 3, station.color, 0.8);
-    const ring = this.add.circle(station.x, station.y - 17, 4, station.color, 0.4);
+    const ping = this.add.circle(station.x, station.y - 16, 2.5, station.color, 0.9);
+    const ring = this.add.circle(station.x, station.y - 16, 4, station.color, 0.4);
     ring.setStrokeStyle(1, station.color);
     ring.setVisible(station.id === this.activeStationId);
 

@@ -133,7 +133,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
       case 'capture':
         return hasPendingObservations ? 'antenna' : 'camera';
       case 'downlink':
-        return 'antenna';
+        return hasPendingObservations ? 'antenna' : 'report';
       case 'review':
         if (!hasUnclassifiedObservations && usefulEvidence < requiredEvidence) {
           return 'base';
@@ -547,7 +547,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
       case 'capture':
         return hasPendingObservations ? 'Transmitir por Antena' : 'Disparar Sensor NAOMI';
       case 'downlink':
-        return 'Transmitir por Antena';
+        return hasPendingObservations ? 'Transmitir por Antena' : 'Clasificar Evidencia Óptica';
       case 'review':
         if (hasUnclassifiedObservations) return 'Clasificar Evidencia';
         if (usefulEvidence < requiredEvidence) return 'Solicitar 2da Observación (Río Chira)';
@@ -1069,6 +1069,26 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                           );
                         }
 
+                        if (activeObs && activeObs.transmitted) {
+                          return (
+                            <button
+                              onClick={() => {
+                                soundManager.playClick();
+                                if (!isMultiplayer && role !== 'ground') {
+                                  onRoleChange?.('ground');
+                                }
+                                setActiveModal('report');
+                              }}
+                              className="px-4 py-2 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-mono font-bold text-xs rounded shadow flex items-center gap-1.5"
+                              title="Telemetría recibida en tierra. Ir a Centro de Análisis para clasificar la imagen."
+                            >
+                              <span>✓ Telemetría Recibida</span>
+                              <span>·</span>
+                              <span>Ir a Clasificar en Centro de Análisis →</span>
+                            </button>
+                          );
+                        }
+
                         return (
                           <button
                             onClick={handleTransmitObservation}
@@ -1088,9 +1108,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                             }
                             className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-slate-950 font-mono font-bold text-xs rounded shadow"
                           >
-                            {activeObs?.transmitted
-                              ? '✓ Telemetría Transmitida'
-                              : role === 'satellite'
+                            {role === 'satellite'
                               ? 'Transmitir por Antena Banda X 📡'
                               : 'Aguardando enlace de Satélite'}
                           </button>
@@ -1107,12 +1125,12 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                     Centro de Análisis · CNOIS
                   </div>
                   <h3>
-                    {snapshot.phase === 'review'
+                    {snapshot.phase === 'review' || hasUnclassifiedObservations
                       ? 'Evaluación de Evidencia Satelital'
                       : 'Informe de Situación Simulado'}
                   </h3>
 
-                  {snapshot.phase === 'review' ? (
+                  {snapshot.phase === 'review' || hasUnclassifiedObservations ? (
                     <div>
                       <p className="text-xs text-slate-300 mb-3">
                         Inspecciona la imagen satelital recibida y determina el hallazgo prudente.

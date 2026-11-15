@@ -534,7 +534,7 @@ export const RoomLobbyModal: React.FC<RoomLobbyModalProps> = ({
               </div>
 
               <p className="text-[10px] text-amber-300/80">
-                🔒 <strong>Seguridad:</strong> Utiliza únicamente la clave pública anónima (<code className="font-mono">anon</code>). Nunca ingreses la clave <code className="font-mono">service_role</code> en el navegador.
+                🔒 <strong>Seguridad:</strong> Utiliza únicamente la clave pública anónima (<code className="font-mono">anon</code>). Nunca ingreses claves secretas o administrativas en el navegador.
               </p>
 
               <button

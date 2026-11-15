@@ -83,7 +83,7 @@ describe('DevMissionGateway - Integration & Verification Suite', () => {
       payload: { observationId: obsId },
     };
     const res5 = await gateway.dispatch(roomId, action5);
-    expect(res5.snapshot.phase).toBe('downlink');
+    expect(res5.snapshot.phase).toBe('review'); // Tras transmitir la imagen requerida, transiciona a review para clasificar
     expect(res5.snapshot.resources.energyWh).toBe(84); // 88 - 4
     expect(res5.snapshot.resources.contactSeconds).toBe(52); // 80 - 28
     expect(res5.snapshot.observations[0].transmitted).toBe(true);

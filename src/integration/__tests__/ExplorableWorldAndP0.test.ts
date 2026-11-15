@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FloodSnapshot } from '../../missions/flood/types';
-import { createInitialSnapshot } from '../../missions/flood/rules';
+import { applyAction, createInitialSnapshot } from '../../missions/flood/rules';
 import { missionBridge } from '../missionBridge';
 
 describe('P0 & P1 Integración: Mundo Explorable y Correcciones de Jugabilidad', () => {
@@ -112,5 +112,366 @@ describe('P0 & P1 Integración: Mundo Explorable y Correcciones de Jugabilidad',
     });
     const needRequest = !snap.observations[0].requested;
     expect(needRequest).toBe(true); // Base debe autorizar primero
+  });
+
+  it('PRIORIDAD 1 REGRESIÓN: TRANSMIT_IMAGE transiciona a review y desbloquea CLASSIFY_IMAGE', () => {
+    const act = (
+      s: FloodSnapshot,
+      role: 'ground' | 'satellite',
+      action: { type: string; payload?: Record<string, unknown> }
+    ) =>
+      applyAction(s, {
+        eventId: `ev-${Math.random()}`,
+        expectedRevision: s.revision,
+        actorRole: role,
+        action: {
+          actionId: `act-${Math.random()}`,
+          actorRole: role,
+          expectedRevision: s.revision,
+          ...action,
+        } as any,
+        nowUtc: new Date().toISOString(),
+      });
+
+    // 1. Estado inicial en A1
+    let snap = createInitialSnapshot('regress-room-01', 'A1');
+
+    // 2. Base solicita observación de Piura
+    const res1 = act(snap, 'ground', {
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res1.ok).toBe(true);
+    if (!res1.ok) return;
+    snap = res1.snapshot;
+    expect(snap.phase).toBe('planning');
+
+    // 3. Satélite aprueba plan estándar
+    const res2 = act(snap, 'satellite', {
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'standard' },
+    });
+    expect(res2.ok).toBe(true);
+    if (!res2.ok) return;
+    snap = res2.snapshot;
+    expect(snap.phase).toBe('capture');
+
+    // 4. Satélite captura imagen
+    const res3 = act(snap, 'satellite', {
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res3.ok).toBe(true);
+    if (!res3.ok) return;
+    snap = res3.snapshot;
+    expect(snap.observations).toHaveLength(1);
+    const obsId = snap.observations[0].observationId;
+
+    // Regla de seguridad: Clasificar una imagen no transmitida debe fallar con NOT_TRANSMITTED
+    const resIllegalClass = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obsId, finding: 'possible_flood' },
+    });
+    expect(resIllegalClass.ok).toBe(false);
+    if (!resIllegalClass.ok) {
+      expect(resIllegalClass.code).toBe('NOT_TRANSMITTED');
+    }
+
+    // 5. Base solicita transmisión por Banda X
+    const res4 = act(snap, 'ground', {
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obsId },
+    });
+    expect(res4.ok).toBe(true);
+    if (!res4.ok) return;
+    snap = res4.snapshot;
+    expect(snap.phase).toBe('downlink');
+
+    // 6. Satélite transmite la imagen
+    const res5 = act(snap, 'satellite', {
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obsId },
+    });
+    expect(res5.ok).toBe(true);
+    if (!res5.ok) return;
+    snap = res5.snapshot;
+
+    // FIX CONFIRMADO: Al terminar la transmisión pendiente, phase debe ser 'review' (desbloqueando la UI)
+    expect(snap.phase).toBe('review');
+    expect(snap.observations[0].transmitted).toBe(true);
+
+    // 7. Base clasifica la imagen en el Centro de Análisis sin bloqueos ni mutaciones artificiales
+    const res6 = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obsId, finding: 'possible_flood' },
+    });
+    expect(res6.ok).toBe(true);
+    if (!res6.ok) return;
+    snap = res6.snapshot;
+    expect(snap.observations[0].finding).toBe('possible_flood');
+  });
+
+  it('A1 CICLO 2 COMPLETO: Flujo integral de dos observaciones hasta victoria', () => {
+    const act = (
+      s: FloodSnapshot,
+      role: 'ground' | 'satellite',
+      action: { type: string; payload?: Record<string, unknown> }
+    ) =>
+      applyAction(s, {
+        eventId: `ev-${Math.random()}`,
+        expectedRevision: s.revision,
+        actorRole: role,
+        action: {
+          actionId: `act-${Math.random()}`,
+          actorRole: role,
+          expectedRevision: s.revision,
+          ...action,
+        } as any,
+        nowUtc: new Date().toISOString(),
+      });
+
+    let snap = createInitialSnapshot('a1-cycle2-room', 'A1');
+
+    // Ciclo 1: Piura Río
+    let res = act(snap, 'ground', {
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'standard' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    const obs1Id = snap.observations[0].observationId;
+
+    res = act(snap, 'ground', {
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obs1Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obs1Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('review');
+
+    res = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obs1Id, finding: 'possible_flood' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    // Ciclo 2: Base solicita segunda zona requerida en A1 (Piura Urbano)
+    res = act(snap, 'ground', {
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'piura-urbano' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('planning');
+
+    res = act(snap, 'satellite', {
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'compressed' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('capture');
+
+    res = act(snap, 'satellite', {
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'piura-urbano' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.observations).toHaveLength(2);
+    const obs2Id = snap.observations[1].observationId;
+
+    res = act(snap, 'ground', {
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obs2Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('downlink');
+
+    res = act(snap, 'satellite', {
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obs2Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('review');
+
+    res = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obs2Id, finding: 'normal' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    // Cierre: Ambas observaciones válidas clasificadas -> Enviar informe final
+    res = act(snap, 'ground', {
+      type: 'SUBMIT_REPORT',
+      payload: { reportId: 'informe-a1-final' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.status).toBe('won');
+    expect(snap.phase).toBe('debrief');
+    expect(snap.reportFinding).toBe('possible_flood');
+  });
+
+  it('ESCENARIO A2: Manejo de imagen nublada, clasificación insuficiente y reintento exitoso', () => {
+    const act = (
+      s: FloodSnapshot,
+      role: 'ground' | 'satellite',
+      action: { type: string; payload?: Record<string, unknown> }
+    ) =>
+      applyAction(s, {
+        eventId: `ev-${Math.random()}`,
+        expectedRevision: s.revision,
+        actorRole: role,
+        action: {
+          actionId: `act-${Math.random()}`,
+          actorRole: role,
+          expectedRevision: s.revision,
+          ...action,
+        } as any,
+        nowUtc: new Date().toISOString(),
+      });
+
+    let snap = createInitialSnapshot('a2-room', 'A2');
+
+    // 1. Primer intento en piura-rio genera captura con nubes ('cloudy' según SCENARIOS.A2)
+    let res = act(snap, 'ground', {
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'standard' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.observations[0].quality).toBe('cloudy');
+    const obs1Id = snap.observations[0].observationId;
+
+    // 2. Transmisión
+    res = act(snap, 'ground', {
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obs1Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obs1Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('review');
+
+    // 3. Clasificación científica: clasificar una imagen nublada como posible desborde es inválido
+    const resIllegal = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obs1Id, finding: 'possible_flood' },
+    });
+    expect(resIllegal.ok).toBe(false);
+    if (!resIllegal.ok) {
+      expect(resIllegal.code).toBe('INVALID_EVIDENCE');
+    }
+
+    // Clasificación correcta como 'insufficient'
+    res = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obs1Id, finding: 'insufficient' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.observations[0].finding).toBe('insufficient');
+
+    // 4. Segundo intento en piura-rio (outcomes: ['cloudy', 'valid'] -> ahora 'valid')
+    res = act(snap, 'ground', {
+      type: 'REQUEST_OBSERVATION',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'APPROVE_PLAN',
+      payload: { profileId: 'standard' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'CAPTURE_IMAGE',
+      payload: { targetId: 'piura-rio' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.observations[1].quality).toBe('valid');
+    const obs2Id = snap.observations[1].observationId;
+
+    res = act(snap, 'ground', {
+      type: 'REQUEST_TRANSMISSION',
+      payload: { observationId: obs2Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    res = act(snap, 'satellite', {
+      type: 'TRANSMIT_IMAGE',
+      payload: { observationId: obs2Id },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.phase).toBe('review');
+
+    res = act(snap, 'ground', {
+      type: 'CLASSIFY_IMAGE',
+      payload: { observationId: obs2Id, finding: 'possible_flood' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+
+    // 5. Informe final en A2 (requiere 1 evidencia útil) -> 'won'
+    res = act(snap, 'ground', {
+      type: 'SUBMIT_REPORT',
+      payload: { reportId: 'informe-a2-prudente' },
+    });
+    expect(res.ok).toBe(true);
+    snap = (res as any).snapshot;
+    expect(snap.status).toBe('won');
+    expect(snap.reportFinding).toBe('possible_flood');
   });
 });

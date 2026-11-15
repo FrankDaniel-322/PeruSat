@@ -289,7 +289,10 @@ export function applyAction(
       res.contactSeconds -= seconds;
       res.energyWh -= TRANSMIT_ENERGY_WH;
       obs.transmitted = true;
-      if (!hasPendingPlan(next)) next.phase = 'downlink';
+      if (!hasPendingPlan(next)) {
+        const hasPendingTransmissions = next.observations.some((o) => !o.transmitted);
+        next.phase = hasPendingTransmissions ? 'downlink' : 'review';
+      }
       break;
     }
 
