@@ -156,7 +156,7 @@ Deno.test('commit_mission_event: no miembro, estado inconsistente y límites', a
   assertEquals((await commit(A, 'ground', 'e-2', 0, { ...next, revision: 2 })).rows[0].r.status, 'stale');
 });
 
-Deno.test('mission_events lleva orden estricto (seq) y Realtime publica solo mission_state', async () => {
+Deno.test('mission_events lleva orden estricto (seq) y Realtime publica mission_state y mission_events', async () => {
   const { db } = await withRoom();
   for (let i = 1; i <= 3; i++) {
     await db.query(
@@ -167,7 +167,8 @@ Deno.test('mission_events lleva orden estricto (seq) y Realtime publica solo mis
   assertEquals(order.rows.map((r) => r.event_id), ['e-1', 'e-2', 'e-3']);
   const pub = await db.query<{ tablename: string }>(
     "select tablename from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' order by 1");
-  assertEquals(pub.rows.map((r) => r.tablename), ['mission_state']);
+  // SupabaseMissionGateway se suscribe a ambas: si una no estuviera publicada, Realtime rechaza el canal.
+  assertEquals(pub.rows.map((r) => r.tablename), ['mission_events', 'mission_state']);
 });
 
 Deno.test('el código de sala usa el alfabeto sin ambigüedades y no se repite', async () => {

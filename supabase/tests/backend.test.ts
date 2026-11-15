@@ -1,6 +1,9 @@
 // Pruebas de aceptación del backend (casos B01-B14 del documento del Rol 02).
 // Ejecutan los manejadores reales contra las migraciones SQL reales (PGlite).
-//   deno test --allow-read --allow-env=NODE_V8_COVERAGE supabase/tests/backend.test.ts   (ver supabase/README.md)
+//   deno test --config supabase/deno.json --allow-read --allow-env --allow-sys supabase/tests/   (ver supabase/README.md)
+//
+// Formato de dispatch_action (acordado con SupabaseMissionGateway): los resultados de juego viajan en 200
+// como { ok: false, code, message }; solo los fallos de protocolo son 4xx/5xx.
 
 import { assert, assertEquals, assertNotEquals } from 'jsr:@std/assert@1.0.6';
 import { handleCreateRoom } from '../functions/_shared/createRoom.ts';
@@ -16,6 +19,9 @@ const B = '22222222-2222-4222-8222-222222222222'; // invitado (satellite)
 const C = '33333333-3333-4333-8333-333333333333'; // ajeno a la sala
 
 type Json = Record<string, any>;
+
+/** Acción aceptada: 200 con ok:true (un 200 con ok:false es un resultado de juego, no un éxito). */
+const isOk = (s: { res: Response; body: Json }): boolean => s.res.status === 200 && s.body.ok === true;
 
 class Harness {
   store!: PgliteStore;
@@ -179,9 +185,10 @@ Deno.test('B05 ground intenta CAPTURE_IMAGE: rechazo sin cambiar el snapshot', a
   const h = await Harness.withRoom('A1');
   const before = await h.snapshot();
   const { res, body } = await h.act('tokA', 'ground', 'CAPTURE_IMAGE', { targetId: 'piura-rio' });
-  assertEquals(res.status, 422);
-  assertEquals(body.code, 'ACTION_DENIED');
-  assertEquals(body.denialCode, 'WRONG_ROLE');
+  assertEquals(res.status, 200);
+  assertEquals(body.ok, false);
+  assertEquals(body.code, 'WRONG_ROLE');
+  assert(typeof body.message === 'string' && body.message.length > 0, 'trae el texto en español para la UI');
   assertEquals(await h.snapshot(), before);
   assertEquals(await h.currentRevision(), 0);
 });
@@ -199,11 +206,13 @@ Deno.test('B05b el rol del navegador no es autorización: satellite diciendo ser
 
 Deno.test('B06 A1 completa desde dos clientes: ganada, recursos y puntaje coherentes', async () => {
   const h = await Harness.withRoom('A1');
-  for (const s of await h.cycle('piura-rio', 'obs-1', 'possible_flood')) assertEquals(s.res.status, 200, JSON.stringify(s.body));
-  for (const s of await h.cycle('piura-urbano', 'obs-2', 'possible_flood')) assertEquals(s.res.status, 200, JSON.stringify(s.body));
+  for (const s of await h.cycle('piura-rio', 'obs-1', 'possible_flood')) assert(isOk(s), JSON.stringify(s.body));
+  for (const s of await h.cycle('piura-urbano', 'obs-2', 'possible_flood')) assert(isOk(s), JSON.stringify(s.body));
   const done = await h.act('tokA', 'ground', 'SUBMIT_REPORT', { reportId: 'REP-A1' });
-  assertEquals(done.res.status, 200, JSON.stringify(done.body));
-  const snap = done.body.snapshot as FloodSnapshot;
+  assert(isOk(done), JSON.stringify(done.body));
+  assertEquals(done.body.change.eventId, done.actionId);
+  assertEquals(done.body.change.actionId, done.actionId);
+  const snap = done.body.change.snapshot as FloodSnapshot;
   assertEquals(snap.status, 'won');
   assertEquals(snap.phase, 'debrief');
   // 100 Wh - 2*12 captura - 2*4 envío = 68; 70 MB - 2*14 = 42; 80 s - 2*28 = 24; 100 - 2*10 = 80
@@ -221,11 +230,12 @@ Deno.test('B07 A2 con primera toma nublada: no se puede afirmar inundación con 
   const h = await Harness.withRoom('A2');
   const steps = await h.cycle('piura-rio', 'obs-1', 'possible_flood');
   const last = steps[steps.length - 1];
-  assertEquals(last.res.status, 422);
-  assertEquals(last.body.denialCode, 'INVALID_EVIDENCE');
+  assertEquals(last.res.status, 200);
+  assertEquals(last.body.ok, false);
+  assertEquals(last.body.code, 'INVALID_EVIDENCE');
   assertEquals((await h.snapshot()).observations[0].quality, 'cloudy');
   const ok = await h.act('tokA', 'ground', 'CLASSIFY_IMAGE', { observationId: 'obs-1', finding: 'insufficient' });
-  assertEquals(ok.res.status, 200);
+  assert(isOk(ok), JSON.stringify(ok.body));
 });
 
 Deno.test('B13 informe: la conclusión sale de las evidencias válidas, no de lo que diga el cliente', async () => {
@@ -233,8 +243,8 @@ Deno.test('B13 informe: la conclusión sale de las evidencias válidas, no de lo
   await h.cycle('piura-rio', 'obs-1', 'possible_flood'); // nublada: el último paso se deniega
   await h.act('tokA', 'ground', 'CLASSIFY_IMAGE', { observationId: 'obs-1', finding: 'insufficient' });
   const done = await h.act('tokA', 'ground', 'SUBMIT_REPORT', { finding: 'possible_flood', reportId: 'REP-FALSO' });
-  assertEquals(done.res.status, 200);
-  const snap = done.body.snapshot as FloodSnapshot;
+  assert(isOk(done), JSON.stringify(done.body));
+  const snap = done.body.change.snapshot as FloodSnapshot;
   assertEquals(snap.reportFinding, 'insufficient', 'el motor ignora el finding enviado');
   assertEquals(snap.status, 'lost');
   const rep = await h.store.db.query<{ finding: string; evidence: string[]; score: { total: number } }>(
@@ -246,8 +256,8 @@ Deno.test('B13 informe: la conclusión sale de las evidencias válidas, no de lo
 
 Deno.test('B13b los alias de zona no penalizan una clasificación correcta (puntaje en el servidor)', async () => {
   const h = await Harness.withRoom('A1');
-  for (const s of await h.cycle('rio-piura', 'obs-1', 'possible_flood', 'optico-submetrico')) assertEquals(s.res.status, 200, JSON.stringify(s.body));
-  for (const s of await h.cycle('piura-urbano', 'obs-2', 'possible_flood')) assertEquals(s.res.status, 200, JSON.stringify(s.body));
+  for (const s of await h.cycle('rio-piura', 'obs-1', 'possible_flood', 'optico-submetrico')) assert(isOk(s), JSON.stringify(s.body));
+  for (const s of await h.cycle('piura-urbano', 'obs-2', 'possible_flood')) assert(isOk(s), JSON.stringify(s.body));
   await h.act('tokA', 'ground', 'SUBMIT_REPORT', { reportId: 'REP-ALIAS' });
   const rep = await h.store.db.query<{ score: { total: number; breakdown: { rigor: number } } }>(
     'select score from public.mission_reports where room_id = $1', [h.roomId]);
@@ -261,9 +271,9 @@ Deno.test('B08 acción repetida con el mismo actionId: no se aplica ni se cobra 
   const h = await Harness.withRoom('A1');
   await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' }, { actionId: 'a-req' });
   const first = await h.act('tokB', 'satellite', 'APPROVE_PLAN', { profileId: 'standard' }, { actionId: 'a-plan' });
-  assertEquals(first.res.status, 200);
+  assert(isOk(first), JSON.stringify(first.body));
   const cap = await h.act('tokB', 'satellite', 'CAPTURE_IMAGE', { targetId: 'piura-rio' }, { actionId: 'a-cap' });
-  assertEquals(cap.res.status, 200);
+  assert(isOk(cap), JSON.stringify(cap.body));
   const after = await h.snapshot();
   assertEquals(after.resources.energyWh, 88);
   const revision = await h.currentRevision();
@@ -271,9 +281,10 @@ Deno.test('B08 acción repetida con el mismo actionId: no se aplica ni se cobra 
 
   // Reintento por red: mismo actionId, mismo contenido y la misma revisión esperada de entonces.
   const retry = await h.act('tokB', 'satellite', 'CAPTURE_IMAGE', { targetId: 'piura-rio' }, { actionId: 'a-cap', expectedRevision: revision - 1 });
-  assertEquals(retry.res.status, 200);
+  assert(isOk(retry), JSON.stringify(retry.body));
   assertEquals(retry.body.duplicate, true);
-  assertEquals(retry.body.snapshot.revision, revision);
+  assertEquals(retry.body.change.actionId, 'a-cap');
+  assertEquals(retry.body.change.snapshot.revision, revision);
   assertEquals((await h.snapshot()).resources.energyWh, 88, 'no se cobra dos veces');
   assertEquals(await h.currentRevision(), revision);
   assertEquals(await h.count('mission_events'), events);
@@ -284,9 +295,8 @@ Deno.test('B08b reintento de una acción denegada devuelve la misma denegación'
   const h = await Harness.withRoom('A1');
   const one = await h.act('tokA', 'ground', 'CAPTURE_IMAGE', { targetId: 'piura-rio' }, { actionId: 'a-bad' });
   const two = await h.act('tokA', 'ground', 'CAPTURE_IMAGE', { targetId: 'piura-rio' }, { actionId: 'a-bad' });
-  assertEquals(one.res.status, 422);
-  assertEquals(two.res.status, 422);
-  assertEquals(two.body.denialCode, 'WRONG_ROLE');
+  assertEquals([one.res.status, one.body.ok, one.body.code], [200, false, 'WRONG_ROLE']);
+  assertEquals([two.res.status, two.body.ok, two.body.code], [200, false, 'WRONG_ROLE']);
   assertEquals(two.body.duplicate, true);
   assertEquals(await h.count('mission_events'), 1);
 });
@@ -296,22 +306,21 @@ Deno.test('B09 mismo actionId con contenido distinto: rechazo sin corromper el h
   await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' }, { actionId: 'a-1' });
   const before = await h.snapshot();
   const clash = await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-urbano' }, { actionId: 'a-1', expectedRevision: 0 });
-  assertEquals(clash.res.status, 409);
-  assertEquals(clash.body.code, 'DUPLICATE_ACTION');
+  assertEquals([clash.res.status, clash.body.ok, clash.body.code], [200, false, 'duplicate']);
+  assertEquals(clash.body.change, undefined, 'un actionId con otro contenido no devuelve un cambio');
   assertEquals(await h.snapshot(), before);
   assertEquals(await h.count('mission_events'), 1);
   // Otro usuario tampoco puede reutilizar el actionId ajeno.
   const stolen = await h.act('tokB', 'satellite', 'APPROVE_PLAN', { profileId: 'standard' }, { actionId: 'a-1' });
-  assertEquals(stolen.res.status, 409);
+  assertEquals([stolen.body.ok, stolen.body.code], [false, 'duplicate']);
 });
 
 Deno.test('B10 dos acciones con la misma expectedRevision: solo una confirma', async () => {
   const h = await Harness.withRoom('A1');
   const one = await h.act('tokA', 'ground', 'RESET_MISSION', {}, { expectedRevision: 0 });
   const two = await h.act('tokB', 'satellite', 'RESET_MISSION', {}, { expectedRevision: 0 });
-  assertEquals(one.res.status, 200);
-  assertEquals(two.res.status, 409);
-  assertEquals(two.body.code, 'REVISION_CONFLICT');
+  assert(isOk(one), JSON.stringify(one.body));
+  assertEquals([two.res.status, two.body.ok, two.body.code], [200, false, 'STALE_REVISION']);
   assertEquals(two.body.revision, 1);
   assertEquals(two.body.snapshot.revision, 1, 'el conflicto trae el snapshot vigente');
 });
@@ -332,8 +341,7 @@ Deno.test('B10b carrera real: el estado cambia entre la lectura y el commit => S
   };
   const { res, body } = await h.act('tokA', 'ground', 'RESET_MISSION', {}, { expectedRevision: 0 });
   assertEquals(interleaved, true);
-  assertEquals(res.status, 409);
-  assertEquals(body.code, 'REVISION_CONFLICT');
+  assertEquals([res.status, body.ok, body.code], [200, false, 'STALE_REVISION']);
   assertEquals(await h.currentRevision(), 1, 'solo se aplicó una de las dos');
 });
 
@@ -343,10 +351,10 @@ Deno.test('B11 reconexión: el snapshot leído coincide con el confirmado y no s
   const h = await Harness.withRoom('A1');
   const a = await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' });
   const reread = await h.snapshot();
-  assertEquals(reread, a.body.snapshot);
+  assertEquals(reread, a.body.change.snapshot);
   const events = await h.count('mission_events');
   const replay = await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' }, { actionId: a.actionId, expectedRevision: 0 });
-  assertEquals(replay.res.status, 200);
+  assert(isOk(replay), JSON.stringify(replay.body));
   assertEquals(await h.count('mission_events'), events);
 });
 
@@ -362,7 +370,7 @@ Deno.test('B12 fallo del almacén: error recuperable, sin éxito falso y sin cam
   // Recuperación: mismo actionId, ya con el almacén sano.
   h.store.commit = original;
   const retry = await h.act('tokA', 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' }, { actionId: 'a-retry', expectedRevision: 0 });
-  assertEquals(retry.res.status, 200);
+  assert(isOk(retry), JSON.stringify(retry.body));
   assertEquals(await h.currentRevision(), 1);
 });
 
@@ -419,17 +427,51 @@ Deno.test('RESET_MISSION conserva miembros, borra observaciones e informes y per
   await h.act('tokA', 'ground', 'SUBMIT_REPORT', { reportId: 'REP-1' });
   assertEquals(await h.count('mission_reports'), 1);
   const reset = await h.act('tokB', 'satellite', 'RESET_MISSION', { scenarioId: 'A2' });
-  assertEquals(reset.res.status, 200);
-  assertEquals((reset.body.snapshot as FloodSnapshot).scenarioId, 'A2');
+  assert(isOk(reset), JSON.stringify(reset.body));
+  assertEquals((reset.body.change.snapshot as FloodSnapshot).scenarioId, 'A2');
   assertEquals(await h.count('observations'), 0);
   assertEquals(await h.count('mission_reports'), 0);
   assertEquals(await h.count('room_members'), 2);
   // El informe de la nueva partida se guarda aunque reutilice el id anterior.
   await h.cycle('piura-agricola', 'obs-1', 'normal');
   const rep = await h.act('tokA', 'ground', 'SUBMIT_REPORT', { reportId: 'REP-1' });
-  assertEquals(rep.res.status, 200);
+  assert(isOk(rep), JSON.stringify(rep.body));
   assertEquals(await h.count('mission_reports'), 1);
   assertNotEquals((await h.snapshot()).status, 'ready');
+});
+
+// ───────────────────────────── Compatibilidad con SupabaseMissionGateway (Rol 01) ─────────────────────────────
+
+Deno.test('compat: create_room acepta ownerRole (nombre del cliente) y preferredRole; si difieren, 400', async () => {
+  const h = await Harness.create();
+  const viaOwner = await handleCreateRoom(h.req('tokA', { scenarioId: 'A1', ownerRole: 'satellite' }), h.deps);
+  const body = (await viaOwner.json()) as Json;
+  assertEquals([viaOwner.status, body.role], [200, 'satellite']);
+  const both = await handleCreateRoom(h.req('tokB', { scenarioId: 'A2', ownerRole: 'ground', preferredRole: 'ground' }), h.deps);
+  assertEquals(both.status, 200);
+  const clash = await handleCreateRoom(h.req('tokC', { scenarioId: 'A1', ownerRole: 'ground', preferredRole: 'satellite' }), h.deps);
+  assertEquals(clash.status, 400);
+  const bad = await handleCreateRoom(h.req('tokC', { scenarioId: 'A1', ownerRole: 'admin' }), h.deps);
+  assertEquals(bad.status, 400);
+});
+
+Deno.test('compat: dispatch tolera expectedRevision repetido fuera de la acción solo si coincide', async () => {
+  const h = await Harness.withRoom('A1');
+  const action = { actionId: 'c-1', actorRole: 'ground', expectedRevision: 0, type: 'REQUEST_OBSERVATION', payload: { targetId: 'rio-piura' } };
+  const same = await handleDispatchAction(h.req('tokA', { roomId: h.roomId, action, expectedRevision: 0 }), h.deps);
+  const sameBody = (await same.json()) as Json;
+  assert(same.status === 200 && sameBody.ok === true, JSON.stringify(sameBody));
+  const other = await handleDispatchAction(
+    h.req('tokA', { roomId: h.roomId, action: { ...action, actionId: 'c-2', expectedRevision: 1, type: 'RESET_MISSION', payload: {} }, expectedRevision: 0 }),
+    h.deps);
+  assertEquals(other.status, 400);
+});
+
+Deno.test('compat: todos los fallos de protocolo llevan ok:false y code', async () => {
+  const h = await Harness.withRoom('A1');
+  const res = await handleDispatchAction(h.req(null, { roomId: h.roomId, action: {} }), h.deps);
+  const body = (await res.json()) as Json;
+  assertEquals([res.status, body.ok, body.code], [401, false, 'NOT_AUTHENTICATED']);
 });
 
 // ───────────────────────────── B14: sin claves de servicio en el cliente ─────────────────────────────

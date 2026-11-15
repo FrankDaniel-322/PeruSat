@@ -32,20 +32,28 @@ export async function handleCreateRoom(req: Request, deps: FunctionDeps): Promis
     const raw = body.value;
     if (
       typeof raw !== 'object' || raw === null || Array.isArray(raw) ||
-      Object.keys(raw).some((k) => k !== 'scenarioId' && k !== 'preferredRole')
+      Object.keys(raw).some((k) => k !== 'scenarioId' && k !== 'preferredRole' && k !== 'ownerRole')
     ) {
       return errorResponse(req, deps, 400, 'INVALID_ACTION', 'El cuerpo debe ser { scenarioId, preferredRole? }.');
     }
-    const { scenarioId, preferredRole } = raw as { scenarioId?: unknown; preferredRole?: unknown };
+    // `ownerRole` es el nombre que usa SupabaseMissionGateway (Rol 01); `preferredRole` el del documento
+    // del Rol 02. Se aceptan ambos como el mismo campo; si vienen los dos deben coincidir.
+    const { scenarioId, preferredRole, ownerRole } = raw as {
+      scenarioId?: unknown; preferredRole?: unknown; ownerRole?: unknown;
+    };
     if (scenarioId !== 'A1' && scenarioId !== 'A2') {
       return errorResponse(req, deps, 400, 'INVALID_ACTION', 'scenarioId debe ser "A1" o "A2".');
     }
-    if (preferredRole !== undefined && preferredRole !== 'ground' && preferredRole !== 'satellite') {
-      return errorResponse(req, deps, 400, 'INVALID_ACTION', 'preferredRole debe ser "ground" o "satellite".');
+    const wanted = [preferredRole, ownerRole];
+    if (wanted.some((r) => r !== undefined && r !== 'ground' && r !== 'satellite')) {
+      return errorResponse(req, deps, 400, 'INVALID_ACTION', 'El rol debe ser "ground" o "satellite".');
+    }
+    if (preferredRole !== undefined && ownerRole !== undefined && preferredRole !== ownerRole) {
+      return errorResponse(req, deps, 400, 'INVALID_ACTION', 'preferredRole y ownerRole no coinciden.');
     }
 
     const roomId = deps.uuid();
-    const role: PlayerRole = preferredRole ?? 'ground';
+    const role: PlayerRole = (preferredRole ?? ownerRole ?? 'ground') as PlayerRole;
     const created = await deps.store.createRoom({
       roomId,
       ownerId: user.id,

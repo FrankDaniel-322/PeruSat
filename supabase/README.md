@@ -13,8 +13,8 @@ navegador ──(JWT anónimo)──▶ Edge Function ──▶ applyAction() �
 
 | Pieza | Estado | Evidencia |
 |---|---|---|
-| Migraciones `0001` + `0002` | **Ejecutadas en PostgreSQL real (PGlite, WASM) con un entorno Supabase simulado** | 8 pruebas SQL + 21 de aceptación pasan; sin la `0002` fallan 12 |
-| Manejadores `create_room` y `dispatch_action` | **Probados contra ese SQL** (B01–B14) | `supabase/tests/backend.test.ts` |
+| Migraciones `0001` + `0002` | **Ejecutadas en PostgreSQL real (PGlite, WASM) con un entorno Supabase simulado** | 8 pruebas SQL + 24 de aceptación y compatibilidad pasan (32); sin la `0002` fallaban 12 de las primeras 29 |
+| Manejadores `create_room` y `dispatch_action` | **Probados contra ese SQL** (B01–B14) y contra el formato que espera `SupabaseMissionGateway` | `supabase/tests/backend.test.ts` |
 | Un proyecto Supabase **real** (Auth anónima, Realtime, CORS desplegado, `supabase-js`, empaquetado de las funciones) | **NO probado** | Falta el proyecto: ver «Despliegue». `supabase/tests/smoke.ts` lo comprueba |
 | Realtime entre dos navegadores | **NO probado** | Lo prueba el Rol 01 con la UI |
 | `pnpm test` y `tsc -b` del cliente | **NO ejecutados** (no hay Node en la PC donde se escribió) | Los cambios al motor son mínimos (ver abajo) |
@@ -48,7 +48,6 @@ Contrato público para el Rol 01: `docs/integration/ROLE02_BACKEND_API.md`.
 | Sin orden estricto de eventos para el puntaje | Columna `seq` |
 | El puntaje se calculaba en el cliente con un historial incompleto | Se calcula en el servidor al enviar el informe y se guarda en `mission_reports.score` |
 | Cualquier campo extra de la acción llegaba a `mission_events.action` | Acción canónica estricta, charset y longitudes |
-| Realtime publicaba también `mission_events` (acciones denegadas del otro jugador) | Solo `mission_state` |
 | Intentos denegados ilimitados por sala | Tope de 1000 |
 | **Motor:** `computeScore` restaba 8 puntos a cualquier clasificación correcta sobre un alias de zona (`rio-piura`, `rio-chira`) | Se normaliza el alias; hay prueba (`B13b`) |
 | **Motor:** imports sin extensión no cargan en Deno | `.ts` en los imports relativos de `rules.ts`, `config.ts` y `types.ts` |
@@ -57,6 +56,19 @@ Contrato público para el Rol 01: `docs/integration/ROLE02_BACKEND_API.md`.
 
 Solo dos, ambos mecánicos: extensión `.ts` en los imports relativos (ya permitida por `allowImportingTsExtensions`
 en `tsconfig.json`) y `normalizeTargetId(...)` en el cálculo de `wrongFindings`. No se tocó `src/contracts/`.
+
+### Decisiones para encajar con el cliente del Rol 01
+
+`SupabaseMissionGateway` (rama `feat/multiplayer-p0-fixes`) ya existía cuando se terminó el backend. Las funciones se
+alinearon con él, sin tocar su código:
+
+- `create_room` acepta `ownerRole` (nombre que envía el cliente) además de `preferredRole`.
+- `dispatch_action` responde `{ ok, change: { eventId, actionId, snapshot } }` y envía los resultados de juego
+  (revisión vieja, regla denegada, `actionId` repetido con otro contenido) en un **200** con `ok: false`, porque
+  `supabase.functions.invoke` oculta el cuerpo de las respuestas no 2xx. Los fallos de protocolo siguen siendo 4xx/5xx.
+- Tolera el `expectedRevision` repetido fuera de la acción (si coincide con el de la acción).
+- Realtime mantiene publicadas `mission_state` **y** `mission_events`: el cliente se suscribe a las dos y, si una no
+  estuviera publicada, Realtime rechaza el canal entero.
 
 ### Límites conocidos (no corregidos)
 

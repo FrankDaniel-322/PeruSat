@@ -63,7 +63,7 @@ async function act(user: User, actorRole: 'ground' | 'satellite', type: string, 
     payload,
   };
   const res = await fn('dispatch_action', user, { roomId, action });
-  if (res.status === 200 && !res.body.duplicate) revision = res.body.snapshot.revision;
+  if (res.status === 200 && res.body.ok === true && !res.body.duplicate) revision = res.body.change.snapshot.revision;
   return { ...res, action };
 }
 
@@ -72,7 +72,7 @@ const B = await signInAnonymously();
 const C = await signInAnonymously();
 
 check((await fn('create_room', null, { scenarioId: 'A1' })).status === 401, 'crear sala sin sesión => 401');
-const created = await fn('create_room', A, { scenarioId: 'A1', preferredRole: 'ground' });
+const created = await fn('create_room', A, { scenarioId: 'A1', ownerRole: 'ground' }); // igual que SupabaseMissionGateway
 check(created.status === 200 && created.body.revision === 0 && /^[A-Z0-9]{6}$/.test(created.body.joinCode), 'B01 crear sala (roomId, joinCode, rol, revisión 0)', created.body);
 roomId = created.body.roomId;
 const code: string = created.body.joinCode;
@@ -93,7 +93,7 @@ check(outsiderWrite.status >= 400, 'ningún cliente puede escribir en mission_st
 check((await act(C, 'ground', 'RESET_MISSION')).status === 403, 'el ajeno no puede inyectar acciones => 403');
 check((await act(B, 'ground', 'REQUEST_OBSERVATION', { targetId: 'piura-rio' })).status === 403, 'B05b el rol del navegador no autoriza (B diciendo ser ground) => 403');
 const wrong = await act(A, 'ground', 'CAPTURE_IMAGE', { targetId: 'piura-rio' });
-check(wrong.status === 422 && wrong.body.denialCode === 'WRONG_ROLE', 'B05 ground intenta capturar => denegado', wrong.body);
+check(wrong.status === 200 && wrong.body.ok === false && wrong.body.code === 'WRONG_ROLE', 'B05 ground intenta capturar => denegado', wrong.body);
 
 async function cycle(target: string, obs: string) {
   const steps = [
@@ -104,7 +104,7 @@ async function cycle(target: string, obs: string) {
     await act(B, 'satellite', 'TRANSMIT_IMAGE', { observationId: obs }),
     await act(A, 'ground', 'CLASSIFY_IMAGE', { observationId: obs, finding: 'possible_flood' }),
   ];
-  return steps.every((s) => s.status === 200);
+  return steps.every((s) => s.status === 200 && s.body.ok === true);
 }
 check(await cycle('piura-rio', 'obs-1'), 'observación 1 completa entre dos clientes');
 check(await cycle('piura-urbano', 'obs-2'), 'observación 2 completa entre dos clientes');
@@ -113,8 +113,9 @@ const capture = await act(B, 'satellite', 'REQUEST_OBSERVATION', {}, {}); // acc
 check(capture.status === 400, 'acción mal formada => 400', capture.body);
 
 const report = await act(A, 'ground', 'SUBMIT_REPORT', { reportId: `REP-SMOKE-${Date.now()}` });
-check(report.status === 200 && report.body.snapshot?.status === 'won' && report.body.snapshot?.phase === 'debrief', 'B06 A1 completa => won / debrief', report.body);
-const r = report.body.snapshot?.resources;
+const finalSnapshot = report.body.change?.snapshot;
+check(report.status === 200 && report.body.ok === true && finalSnapshot?.status === 'won' && finalSnapshot?.phase === 'debrief', 'B06 A1 completa => won / debrief', report.body);
+const r = finalSnapshot?.resources;
 check(r && r.energyWh === 68 && r.storageMb === 42 && r.contactSeconds === 24 && r.budgetCredits === 80, 'recursos coherentes (68 Wh, 42 MB, 24 s, 80 créditos)', r);
 
 const stored = await call(`/rest/v1/mission_reports?room_id=eq.${roomId}&select=finding,score,evidence`, A.token);
@@ -124,11 +125,11 @@ check(Array.isArray(outsiderReport.body) && outsiderReport.body.length === 0, 'e
 
 const before = (await readState(A)).body[0];
 const replay = await fn('dispatch_action', A, { roomId, action: report.action });
-check(replay.status === 200 && replay.body.duplicate === true, 'B08 reintento con el mismo actionId => duplicate, sin reaplicar', replay.body);
+check(replay.status === 200 && replay.body.ok === true && replay.body.duplicate === true, 'B08 reintento con el mismo actionId => duplicate, sin reaplicar', replay.body);
 const clash = await act(A, 'ground', 'RESET_MISSION', {}, { actionId: report.action.actionId, expectedRevision: revision });
-check(clash.status === 409 && clash.body.code === 'DUPLICATE_ACTION', 'B09 mismo actionId con otro contenido => 409', clash.body);
+check(clash.body.ok === false && clash.body.code === 'duplicate' && !clash.body.change, 'B09 mismo actionId con otro contenido => rechazado', clash.body);
 const stale = await act(A, 'ground', 'RESET_MISSION', {}, { expectedRevision: 0 });
-check(stale.status === 409 && stale.body.code === 'REVISION_CONFLICT' && stale.body.snapshot, 'B10 revisión vieja => 409 con el snapshot vigente', stale.body);
+check(stale.body.ok === false && stale.body.code === 'STALE_REVISION' && stale.body.snapshot, 'B10 revisión vieja => STALE_REVISION con el snapshot vigente', stale.body);
 const after = (await readState(A)).body[0];
 check(after.revision === before.revision && JSON.stringify(after.snapshot) === JSON.stringify(before.snapshot), 'el estado no cambió con reintentos ni conflictos');
 

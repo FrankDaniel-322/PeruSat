@@ -4,6 +4,13 @@
 //  1. JWT de usuario válido  2. cuerpo y acción canónica  3. membresía real y actorRole coincidente
 //  4. idempotencia por actionId  5. revisión esperada  6. motor applyAction (reglas únicas)
 //  7. commit_mission_event (transacción SQL con bloqueo por sala)  8. respuesta
+//
+// FORMATO (acordado con SupabaseMissionGateway, Rol 01):
+//  - Éxito:  200 { ok: true, change: { eventId, actionId, snapshot }, duplicate? }
+//  - Resultado de juego que NO es un fallo de red (revisión vieja, regla denegada, actionId repetido con
+//    otro contenido): 200 { ok: false, code, message, ... }. supabase-js `functions.invoke` oculta el
+//    cuerpo de las respuestas no 2xx, así que estos casos viajan en un 200 para que el cliente pueda leerlos.
+//  - Fallos de protocolo (sin sesión, no miembro, cuerpo inválido, límites, errores internos): 4xx/5xx.
 
 import {
   applyAction,
@@ -39,6 +46,35 @@ function buildReport(snapshot: FloodSnapshot, events: AppliedEvent[]): ReportInp
   };
 }
 
+type Ctx = { req: Request; deps: FunctionDeps };
+
+const accepted = ({ req, deps }: Ctx, action: MissionAction, snapshot: FloodSnapshot, duplicate = false): Response =>
+  jsonResponse(req, deps.allowedOrigins, 200, {
+    ok: true,
+    change: { eventId: action.actionId, actionId: action.actionId, snapshot },
+    ...(duplicate ? { duplicate: true } : {}),
+  });
+
+const gameResult = ({ req, deps }: Ctx, code: string, message: string, extra: Record<string, unknown> = {}): Response =>
+  jsonResponse(req, deps.allowedOrigins, 200, { ok: false, code, message, ...extra });
+
+const denied = (ctx: Ctx, code: string | null, message: string | undefined, revision: number | undefined, duplicate = false): Response =>
+  gameResult(ctx, code ?? 'ACTION_DENIED', message ?? denialMessage(code), {
+    revision,
+    ...(duplicate ? { duplicate: true } : {}),
+  });
+
+const stale = (ctx: Ctx, revision: number, snapshot?: FloodSnapshot): Response =>
+  gameResult(
+    ctx,
+    'STALE_REVISION',
+    'El estado cambió mientras actuabas. Se te envía la revisión vigente.',
+    { revision, ...(snapshot ? { snapshot } : {}) },
+  );
+
+const payloadClash = (ctx: Ctx): Response =>
+  gameResult(ctx, 'duplicate', 'Ese actionId ya se usó con otra acción.');
+
 export async function handleDispatchAction(req: Request, deps: FunctionDeps): Promise<Response> {
   if (req.method === 'OPTIONS') {
     return new Response(null, { status: 204, headers: corsHeaders(req, deps.allowedOrigins) });
@@ -47,6 +83,7 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
     return errorResponse(req, deps, 405, 'METHOD_NOT_ALLOWED', 'Usa POST.');
   }
 
+  const ctx: Ctx = { req, deps };
   try {
     const { store } = deps;
 
@@ -64,11 +101,12 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
     const raw = body.value;
     if (
       typeof raw !== 'object' || raw === null || Array.isArray(raw) ||
-      Object.keys(raw).some((k) => k !== 'roomId' && k !== 'action')
+      Object.keys(raw).some((k) => k !== 'roomId' && k !== 'action' && k !== 'expectedRevision')
     ) {
       return errorResponse(req, deps, 400, 'INVALID_ACTION', 'El cuerpo debe ser { roomId, action }.');
     }
-    const { roomId: rawRoomId, action: rawAction } = raw as { roomId?: unknown; action?: unknown };
+    const { roomId: rawRoomId, action: rawAction, expectedRevision: topRevision } =
+      raw as { roomId?: unknown; action?: unknown; expectedRevision?: unknown };
     if (typeof rawRoomId !== 'string' || !UUID_RE.test(rawRoomId)) {
       return errorResponse(req, deps, 400, 'INVALID_ACTION', 'roomId no es un UUID válido.');
     }
@@ -76,6 +114,10 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
     const action = canonicalizeAction(rawAction);
     if (!action) {
       return errorResponse(req, deps, 400, 'INVALID_ACTION', 'La acción no cumple el contrato canónico (schemaVersion 3).');
+    }
+    // SupabaseMissionGateway repite la revisión esperada fuera de la acción: se tolera si coincide.
+    if (topRevision !== undefined && topRevision !== action.expectedRevision) {
+      return errorResponse(req, deps, 400, 'INVALID_ACTION', 'expectedRevision no coincide con el de la acción.');
     }
 
     // 3) Autorización: el rol sale de room_members, nunca del navegador.
@@ -89,13 +131,13 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
     // 4) Idempotencia (antes de la revisión: un reintento tras perder la respuesta debe
     //    recibir el resultado original, no un conflicto).
     const prior = await store.findEvent(roomId, action.actionId);
-    if (prior) return await replay(req, deps, roomId, user.id, action, prior);
+    if (prior) return await replay(ctx, roomId, user.id, action, prior);
 
     // 5) Revisión esperada.
     const state = await store.getState(roomId);
     if (!state) return errorResponse(req, deps, 403, 'NOT_AUTHORIZED', 'No perteneces a esta sala.');
     if (action.expectedRevision !== state.revision) {
-      return conflict(req, deps, state.revision, state.snapshot);
+      return stale(ctx, state.revision, state.snapshot);
     }
 
     // 6) Reglas: la hora la pone el servidor.
@@ -127,7 +169,7 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
     });
 
     // 8) Respuesta según lo que confirmó SQL (nunca un éxito que SQL no confirmó).
-    return await respond(req, deps, roomId, user.id, action, committed, applied.ok ? applied.snapshot : state.snapshot, applied);
+    return await respond(ctx, roomId, user.id, action, committed, applied);
   } catch (err) {
     if (err instanceof StoreError && err.kind === 'rate_limited') {
       return errorResponse(req, deps, 429, 'RATE_LIMITED', 'Demasiados intentos. Espera un momento.');
@@ -140,43 +182,36 @@ export async function handleDispatchAction(req: Request, deps: FunctionDeps): Pr
 type Applied = ReturnType<typeof applyAction>;
 
 async function respond(
-  req: Request,
-  deps: FunctionDeps,
+  ctx: Ctx,
   roomId: string,
   userId: string,
   action: MissionAction,
   committed: CommitResult,
-  snapshot: FloodSnapshot,
   applied: Applied,
 ): Promise<Response> {
+  const { req, deps } = ctx;
   switch (committed.status) {
     case 'accepted':
-      return jsonResponse(req, deps.allowedOrigins, 200, {
-        eventId: action.actionId,
-        actionId: action.actionId,
-        snapshot,
-      });
-    case 'denied': {
-      const code = applied.ok ? null : applied.code;
-      return jsonResponse(req, deps.allowedOrigins, 422, {
-        code: 'ACTION_DENIED',
-        denialCode: code,
-        message: applied.ok ? denialMessage(code) : applied.message,
-        revision: committed.revision,
-      });
-    }
+      // SQL solo devuelve 'accepted' cuando se envió 'accepted', es decir, si el motor aceptó.
+      return applied.ok
+        ? accepted(ctx, action, applied.snapshot)
+        : errorResponse(req, deps, 500, 'TRANSPORT_ERROR', 'Respuesta inconsistente del almacén.');
+    case 'denied':
+      return applied.ok
+        ? errorResponse(req, deps, 500, 'TRANSPORT_ERROR', 'Respuesta inconsistente del almacén.')
+        : denied(ctx, applied.code, applied.message, committed.revision);
     case 'stale': {
       const fresh = await deps.store.getState(roomId);
-      return conflict(req, deps, committed.revision ?? fresh?.revision ?? 0, fresh?.snapshot);
+      return stale(ctx, committed.revision ?? fresh?.revision ?? 0, fresh?.snapshot);
     }
     case 'duplicate': {
       // Otra petición con el mismo actionId se confirmó entre la comprobación y el commit.
       const prior = await deps.store.findEvent(roomId, action.actionId);
-      if (prior) return await replay(req, deps, roomId, userId, action, prior);
+      if (prior) return await replay(ctx, roomId, userId, action, prior);
       return errorResponse(req, deps, 500, 'TRANSPORT_ERROR', 'No se pudo confirmar la acción. Reintenta con el mismo actionId.');
     }
     case 'conflict_payload':
-      return errorResponse(req, deps, 409, 'DUPLICATE_ACTION', 'Ese actionId ya se usó con otra acción.');
+      return payloadClash(ctx);
     case 'rate_limited':
       return errorResponse(req, deps, 429, 'RATE_LIMITED', 'Demasiados intentos denegados en esta sala.');
     case 'not_member':
@@ -187,45 +222,20 @@ async function respond(
 
 /** Reintento de un actionId ya registrado: mismo contenido => mismo resultado; otro => conflicto. */
 async function replay(
-  req: Request,
-  deps: FunctionDeps,
+  ctx: Ctx,
   roomId: string,
   userId: string,
   action: MissionAction,
   prior: StoredEvent,
 ): Promise<Response> {
   const sameContent = prior.actorId === userId && canonicalJson(prior.action) === canonicalJson(action);
-  if (!sameContent) {
-    return errorResponse(req, deps, 409, 'DUPLICATE_ACTION', 'Ese actionId ya se usó con otra acción.');
-  }
+  if (!sameContent) return payloadClash(ctx);
   if (prior.result === 'denied') {
-    return jsonResponse(req, deps.allowedOrigins, 422, {
-      code: 'ACTION_DENIED',
-      denialCode: prior.reason,
-      message: denialMessage(prior.reason),
-      revision: prior.revision,
-      duplicate: true,
-    });
+    return denied(ctx, prior.reason, undefined, prior.revision, true);
   }
-  const state = await deps.store.getState(roomId);
-  if (!state) return errorResponse(req, deps, 403, 'NOT_AUTHORIZED', 'No perteneces a esta sala.');
+  const state = await ctx.deps.store.getState(roomId);
+  if (!state) return errorResponse(ctx.req, ctx.deps, 403, 'NOT_AUTHORIZED', 'No perteneces a esta sala.');
   // El snapshot es el vigente (puede ser más nuevo que el de la acción original): el cliente
   // se queda con la revisión mayor. No se fabrica un snapshot histórico.
-  return jsonResponse(req, deps.allowedOrigins, 200, {
-    eventId: action.actionId,
-    actionId: action.actionId,
-    snapshot: state.snapshot,
-    duplicate: true,
-  });
-}
-
-function conflict(req: Request, deps: FunctionDeps, revision: number, snapshot?: FloodSnapshot): Response {
-  return errorResponse(
-    req,
-    deps,
-    409,
-    'REVISION_CONFLICT',
-    'El estado cambió mientras actuabas. Se te envía la revisión vigente.',
-    { revision, ...(snapshot ? { snapshot } : {}) },
-  );
+  return accepted(ctx, action, state.snapshot, true);
 }

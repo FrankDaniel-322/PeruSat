@@ -14,7 +14,7 @@
 --  6. create_room_with_state: valida que el snapshot sea el inicial de ESA sala y limita salas
 --     por usuario; el código de sala sale de un generador criptográfico.
 --  7. Informe: se guarda el puntaje calculado en el servidor (mission_reports.score).
---  8. Realtime: solo mission_state (el cliente no necesita leer eventos).
+--  8. Realtime: mission_state y mission_events publicados (el cliente de Rol 01 usa ambas).
 
 -- ─────────────────────────────── Columnas nuevas ───────────────────────────────
 
@@ -306,19 +306,21 @@ grant execute on function public.commit_mission_event(uuid, text, uuid, text, js
 grant execute on function public.join_room(text) to authenticated;
 
 -- ───────────────────────────── Realtime ─────────────────────────────
--- Solo mission_state: cada cambio confirmado actualiza esa fila. Los eventos (incluidos los
--- denegados del otro jugador) no hace falta publicarlos al navegador.
+-- Se publican mission_state (cada cambio confirmado) y mission_events: SupabaseMissionGateway
+-- se suscribe a las dos y, si una tabla no está publicada, Realtime rechaza el canal entero.
+-- RLS sigue aplicando: un miembro solo recibe los cambios de su sala. Esta sentencia es
+-- idempotente (0001 ya las había añadido).
 do $$
+declare
+  t text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    if exists (select 1 from pg_publication_tables
-                where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'mission_events') then
-      alter publication supabase_realtime drop table public.mission_events;
-    end if;
-    if not exists (select 1 from pg_publication_tables
-                    where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = 'mission_state') then
-      alter publication supabase_realtime add table public.mission_state;
-    end if;
+    foreach t in array array['mission_state', 'mission_events'] loop
+      if not exists (select 1 from pg_publication_tables
+                      where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t) then
+        execute format('alter publication supabase_realtime add table public.%I', t);
+      end if;
+    end loop;
   end if;
 end;
 $$;

@@ -52,14 +52,14 @@ export function jsonResponse(
   });
 }
 
-/** Códigos de error estables (ver docs/integration/ROLE02_BACKEND_API.md). */
+/**
+ * Códigos de error de protocolo (HTTP 4xx/5xx). Los resultados de juego (acción denegada, revisión
+ * vieja, actionId repetido) NO son errores HTTP: ver ROLE02_BACKEND_API.md, sección «Formato».
+ */
 export type ApiErrorCode =
   | 'INVALID_ACTION'
   | 'NOT_AUTHENTICATED'
   | 'NOT_AUTHORIZED'
-  | 'REVISION_CONFLICT'
-  | 'DUPLICATE_ACTION'
-  | 'ACTION_DENIED'
   | 'RATE_LIMITED'
   | 'METHOD_NOT_ALLOWED'
   | 'PAYLOAD_TOO_LARGE'
@@ -73,7 +73,7 @@ export function errorResponse(
   message: string,
   extra: Record<string, unknown> = {},
 ): Response {
-  return jsonResponse(req, deps.allowedOrigins, status, { code, message, ...extra });
+  return jsonResponse(req, deps.allowedOrigins, status, { ok: false, code, message, ...extra });
 }
 
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
