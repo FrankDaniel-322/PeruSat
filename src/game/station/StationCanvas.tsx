@@ -9,6 +9,7 @@ import { missionBridge, type StationId } from '../../integration/missionBridge';
 import { PhaserGame } from '../../integration/PhaserGame';
 import { drawPeruMap } from '../maps/PeruRegions';
 import { FinalMissionReport } from '../report/FinalMissionReport';
+import { EarthToPiuraZoom } from '../cinematics/EarthToPiuraZoom';
 
 interface StationCanvasProps {
   snapshot: MissionSnapshot;
@@ -83,6 +84,9 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
 
   // Modo de visualización: Cabina clásica pixel art o Mundo Explorable 2D con WASD
   const [sceneMode, setSceneMode] = useState<'cabin' | 'explorable'>(initialSceneMode);
+
+  // Visor cinemático de aproximación orbital (Tierra -> Sudamérica -> Perú -> Piura)
+  const [isZoomOpen, setIsZoomOpen] = useState<boolean>(false);
 
   // Panel desplegable para los 6 pasos y bitácora
   const [showDrawer, setShowDrawer] = useState<boolean>(false);
@@ -649,6 +653,17 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
               title="Mundo interactivo 2D: Camina con WASD entre 2 salas y pulsa [E] para operar"
             >
               🚶 Mundo Explorable 2D (2 Salas)
+            </button>
+            <button
+              onClick={() => {
+                soundManager.playClick();
+                setIsZoomOpen(true);
+              }}
+              className="px-2.5 py-1 rounded text-xs font-bold transition-all bg-indigo-950/80 hover:bg-indigo-800 text-cyan-300 border border-indigo-700/80 flex items-center gap-1.5 shadow-sm"
+              title="Secuencia cinemática: Órbita terrestre -> Sudamérica -> Perú -> Cuenca del Río Piura"
+            >
+              <span>🛰️</span>
+              <span>Órbita & Zoom Piura</span>
             </button>
           </div>
         </div>
@@ -1448,6 +1463,19 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Visor Cinemático Orbital: Tierra -> Sudamérica -> Perú -> Piura */}
+      {isZoomOpen && (
+        <EarthToPiuraZoom
+          onClose={() => setIsZoomOpen(false)}
+          onProceedToCapture={() => {
+            if (!isMultiplayer && role !== 'satellite') {
+              onRoleChange?.('satellite');
+            }
+            setActiveModal('camera');
+          }}
+        />
       )}
     </div>
   );
