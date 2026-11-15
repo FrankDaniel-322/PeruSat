@@ -1,0 +1,6 @@
+{
+  "nodeModulesDir": "none",
+  "tasks": {
+    "test": "deno test --config supabase/deno.json --allow-read --allow-env --allow-sys supabase/tests/"
+  }
+}

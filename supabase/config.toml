@@ -1,0 +1,17 @@
+# Configuración mínima de Supabase para PERUSAT CREW (rol 02).
+# El proyecto alojado se enlaza con `supabase link --project-ref <ref>`; ese ref no es secreto,
+# pero tampoco se versiona aquí. Las claves nunca van en este archivo.
+project_id = "perusat-crew"
+
+[auth]
+# Los jugadores entran con sesión anónima (signInAnonymously): hay auth.uid() sin registro.
+enable_anonymous_sign_ins = true
+
+# El JWT del usuario se valida DENTRO de la función con auth.getUser() (ver _shared/http.ts).
+# Se desactiva la verificación del gateway para que el preflight CORS (OPTIONS, sin token)
+# llegue a la función y para que funcione igual con claves publicables nuevas o anon legadas.
+[functions.create_room]
+verify_jwt = false
+
+[functions.dispatch_action]
+verify_jwt = false
