@@ -21,7 +21,11 @@ async function station(page: Page, x: number, y: number, heading: RegExp) {
   const box = await canvas.boundingBox();
   if (!box) throw new Error('La escena Phaser no tiene área visible');
   await canvas.click({ position: { x: box.width * x / 320, y: box.height * y / 180 } });
-  await expect(page.locator('.station-tool').getByRole('heading', { name: heading })).toBeVisible();
+  if (heading.source.includes('Solicitud de Observación')) {
+    await expect(page.locator('.station-tool')).toContainText('Consola Geográfica');
+  } else {
+    await expect(page.locator('.station-tool').getByRole('heading', { name: heading })).toBeVisible();
+  }
 }
 
 async function send(page: Page, name: RegExp) {
@@ -40,8 +44,17 @@ async function role(page: Page, name: 'Base CNOIS' | 'PerúSAT-1') {
 
 async function captureCycle(page: Page, finding: 'possible_flood' | 'insufficient') {
   await page.getByRole('button', { name: /\[E\] (Elegir Provincia y Río|Solicitar 2da Observación)/ }).click();
-  await expect(page.locator('.station-tool').getByRole('heading', { name: /Solicitud de Observación/ })).toBeVisible();
-  await send(page, /Enviar Solicitud al Satélite/);
+  const base = page.locator('.station-tool');
+  await expect(base).toContainText('Consola Geográfica');
+  if (await base.getByRole('button', { name: /Avanzar a Continente Sudamericano/ }).count()) {
+    await base.getByRole('button', { name: /Avanzar a Continente Sudamericano/ }).click();
+    await base.getByRole('button', { name: /Avanzar a Territorio Peruano/ }).click();
+    await base.getByRole('button', { name: /Focalizar Departamento de Piura/ }).click();
+    await base.getByRole('button', { name: /Seleccionar Cuenca Objetivo/ }).click();
+  } else {
+    await base.getByRole('button', { name: /5\. Cuenca Objetivo/ }).click();
+  }
+  await send(page, /Enviar Solicitud(?: de 2da Zona)? al Satélite/);
   await role(page, 'PerúSAT-1');
   await page.getByRole('button', { name: /\[E\] Configurar Sensor Óptico/ }).click();
   await expect(page.locator('.station-tool').getByRole('heading', { name: /Configuración de Resolución/ })).toBeVisible();
@@ -62,7 +75,13 @@ async function captureCycle(page: Page, finding: 'possible_flood' | 'insufficien
   await role(page, 'Base CNOIS');
   await expect(page.getByRole('button', { name: /Clasificar Evidencia/ }),
     'Tras transmitir, la acción disponible debe abrir el análisis').toBeVisible();
-  await station(page, 105, 148, /Evaluación de Evidencia/);
+  await page.getByRole('button', { name: /\[E\] Clasificar Evidencia/ }).click();
+  await expect(page.locator('.station-tool').getByRole('heading', { name: /Evaluación de Evidencia/ })).toBeVisible();
+  if (finding === 'insufficient') {
+    await expect(page.locator('.station-tool')).toContainText('COBERTURA NUBOSA');
+    await mkdir(screenshots, { recursive: true });
+    await page.screenshot({ path: join(screenshots, 'a2-nubes-clasificacion.png'), fullPage: true });
+  }
   await page.locator('.station-tool select').selectOption(finding);
   await send(page, /Registrar Clasificación Científica/);
 }
@@ -91,7 +110,7 @@ test('modo local: alternar Base y Satélite cambia el operador visible', async (
 test('tecla E abre y cierra la consola activa', async ({ page }) => {
   await openGame(page);
   await page.keyboard.press('e');
-  await expect(page.locator('.station-tool').getByRole('heading', { name: /Solicitud de Observación/ })).toBeVisible();
+  await expect(page.locator('.station-tool')).toContainText('Consola Geográfica');
   await page.getByRole('button', { name: 'Cerrar consola' }).click();
   await expect(page.locator('.station-tool')).toHaveCount(0);
 });
@@ -122,14 +141,16 @@ test('menú: A1, A2, lobby y regreso', async ({ page }) => {
 test('A1: una persona completa dos observaciones desde el navegador', async ({ page }) => {
   await openGame(page);
   await captureCycle(page, 'possible_flood');
-  await station(page, 48, 112, /Solicitud de Observación/);
-  const secondRequest = page.locator('.station-tool').getByRole('button', { name: /Enviar Solicitud al Satélite/ });
+  const secondRequest = page.getByRole('button', { name: /\[E\] Solicitar 2da Observación/ });
   await expect(secondRequest, 'A1 exige una segunda solicitud jugable').toBeEnabled();
-  await page.getByRole('button', { name: 'Cerrar consola' }).click();
   await captureCycle(page, 'possible_flood');
-  await station(page, 105, 148, /Evaluación de Evidencia/);
+  await page.getByRole('button', { name: /\[E\] Emitir Informe/ }).click();
   await send(page, /Emitir Informe/);
-  await expect(page.getByText(/Objetivo cumplido|Misión completada|GANADA/i).first()).toBeVisible();
+  await expect(page.getByText(/Misión concluida/i).first()).toBeVisible();
+  await page.getByRole('button', { name: /\[E\] Ver Informe Simulado/ }).click();
+  await expect(page.locator('.station-tool')).toContainText('INFORME DE SITUACIÓN SATELITAL');
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'a1-informe.png'), fullPage: true });
 });
 
 test('A2: nubes, clasificación prudente y nueva observación', async ({ page }) => {
@@ -137,14 +158,16 @@ test('A2: nubes, clasificación prudente y nueva observación', async ({ page })
   const scenarioSelect = page.locator('header select');
   if (await scenarioSelect.count()) await scenarioSelect.selectOption('emergency');
   await captureCycle(page, 'insufficient');
-  await station(page, 48, 112, /Solicitud de Observación/);
-  await expect(page.locator('.station-tool').getByRole('button', { name: /Enviar Solicitud al Satélite/ }),
+  await expect(page.getByRole('button', { name: /\[E\] Solicitar 2da Observación/ }),
     'La imagen nublada debe permitir replanificar').toBeEnabled();
-  await page.getByRole('button', { name: 'Cerrar consola' }).click();
   await captureCycle(page, 'possible_flood');
-  await station(page, 105, 148, /Evaluación de Evidencia/);
+  await page.getByRole('button', { name: /\[E\] Emitir Informe/ }).click();
   await send(page, /Emitir Informe/);
-  await expect(page.getByText(/Objetivo cumplido|Misión completada|GANADA/i).first()).toBeVisible();
+  await expect(page.getByText(/Misión concluida/i).first()).toBeVisible();
+  await page.getByRole('button', { name: /\[E\] Ver Informe Simulado/ }).click();
+  await expect(page.locator('.station-tool')).toContainText('INFORME DE SITUACIÓN SATELITAL');
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: join(screenshots, 'a2-informe.png'), fullPage: true });
 });
 
 for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 1080 }]) {
@@ -166,6 +189,7 @@ for (const viewport of [{ width: 1366, height: 768 }, { width: 1920, height: 108
     expect(modal!.y).toBeGreaterThanOrEqual(0);
     expect(modal!.x + modal!.width).toBeLessThanOrEqual(viewport.width);
     expect(modal!.y + modal!.height).toBeLessThanOrEqual(viewport.height);
+    await page.locator('.station-tool').getByRole('button', { name: /5\. Cuenca Objetivo/ }).click();
     await expect(page.locator('.station-tool').getByRole('button', { name: /Enviar Solicitud/ })).toBeVisible();
     await page.screenshot({ path: join(screenshots, `consola-${viewport.width}x${viewport.height}.png`), fullPage: true });
   });
@@ -186,8 +210,9 @@ test('habitaciones: movimiento, puerta, retorno e interacción E', async ({ page
     .toBeGreaterThan(25_000)
     .catch(() => { throw new Error(`La escena explorable permanece vacía. Consola: ${browserErrors.join(' | ')}`); });
   const resources = await page.locator('main').innerText();
+  await canvas.click({ position: { x: 700, y: 300 } });
   await page.keyboard.press('e');
-  await expect(page.locator('.station-tool').getByRole('heading', { name: /Solicitud de Observación/i })).toBeVisible();
+  await expect(page.locator('.station-tool')).toContainText('Consola Geográfica');
   await page.getByRole('button', { name: 'Cerrar consola' }).click();
   // 25 px hasta el corredor; 220 px hasta la puerta a 100 px/s.
   await page.keyboard.down('w');
@@ -198,7 +223,7 @@ test('habitaciones: movimiento, puerta, retorno e interacción E', async ({ page
   await page.keyboard.up('d');
   await page.screenshot({ path: join(screenshots, 'sala-02-puerta.png'), fullPage: true });
   await page.keyboard.down('ArrowLeft');
-  await page.waitForTimeout(350);
+  await page.waitForTimeout(650);
   await page.keyboard.up('ArrowLeft');
   await page.screenshot({ path: join(screenshots, 'sala-01-retorno.png'), fullPage: true });
   expect((await page.locator('main').innerText()).match(/⚡\s*\d+Wh.*💾\s*\d+MB.*📡\s*\d+s.*🪙\s*\d+cr/)?.[0])
