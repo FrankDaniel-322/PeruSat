@@ -175,7 +175,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
                   <span className="text-[11px] text-amber-400">Emergencia / Nubes</span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1 leading-snug">
-                  Datos NASA IMERG estiman 42.5 mm/h. El sensor óptico enfrenta nubosidad densa. Debes aplicar rigor científico ante evidencia insuficiente.
+                  Escenario hipotético inspirado en IMERG: 42.5 mm/h. El sensor óptico enfrenta nubosidad densa. Debes aplicar rigor científico ante evidencia insuficiente.
                 </p>
               </button>
             </div>
@@ -249,7 +249,7 @@ export const MainMenu: React.FC<MainMenuProps> = ({
             <div className="flex items-center justify-between">
               <div>
                 <div className="text-xs text-blue-400 font-bold uppercase tracking-wider">Ciencia Satelital</div>
-                <h3 className="text-base font-bold text-slate-100">Briefing y Datos NASA IMERG</h3>
+                <h3 className="text-base font-bold text-slate-100">Briefing simulado · referencia NASA IMERG</h3>
               </div>
               <span className="text-2xl">🗺️</span>
             </div>

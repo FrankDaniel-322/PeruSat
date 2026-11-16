@@ -1,5 +1,5 @@
 /**
- * Especificación de Regiones Geográficas y Muestras de Contexto NASA GPM/IMERG.
+ * Regiones y valores hipotéticos del ejercicio, inspirados en NASA GPM/IMERG.
  * Modular y escalable para Misión A (inundaciones en el norte del Perú).
  */
 
@@ -16,7 +16,7 @@ export interface GeographicTarget {
     rateMmH: number;
     accumulated24hMm: number;
     referenceDateUtc: string;
-    source: 'NASA GPM / IMERG V07';
+    source: 'SIMULACIÓN · referencia NASA GPM / IMERG V07';
     sourceUrl: 'https://gpm.nasa.gov/data/imerg';
     scientificNote: string;
   };
@@ -53,9 +53,9 @@ export const PERU_REGIONS: Record<string, RegionDefinition> = {
           rateMmH: 42.5,
           accumulated24hMm: 85.0,
           referenceDateUtc: '2026-03-27T03:00:00Z',
-          source: 'NASA GPM / IMERG V07',
+          source: 'SIMULACIÓN · referencia NASA GPM / IMERG V07',
           sourceUrl: 'https://gpm.nasa.gov/data/imerg',
-          scientificNote: 'Lluvia intensa detectada por multisatélite IMERG. Orienta la prioridad de adquisición óptica pero no certifica anegamiento en tierra.',
+          scientificNote: 'Valor hipotético del ejercicio, inspirado en IMERG. No es una medición NASA ni certifica inundación en tierra.',
         },
         opticalSimulation: {
           riverWidthNormalM: 35,
@@ -76,9 +76,9 @@ export const PERU_REGIONS: Record<string, RegionDefinition> = {
           rateMmH: 34.0,
           accumulated24hMm: 68.0,
           referenceDateUtc: '2026-03-27T03:00:00Z',
-          source: 'NASA GPM / IMERG V07',
+          source: 'SIMULACIÓN · referencia NASA GPM / IMERG V07',
           sourceUrl: 'https://gpm.nasa.gov/data/imerg',
-          scientificNote: 'Estimación de precipitación satelital de referencia. Se requiere imagen óptica para contrastar espejo de agua.',
+          scientificNote: 'Valor hipotético del ejercicio. Se requiere evidencia óptica válida para contrastar la situación.',
         },
         opticalSimulation: {
           riverWidthNormalM: 55,

@@ -76,12 +76,12 @@ export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
               <span className="font-mono">{targetInfo.coords.lat}° S, {targetInfo.coords.lng}° W</span>
             </div>
             <div>
-              <span className="text-slate-500">Precipitación Estimada (NASA GPM/IMERG):</span>{' '}
+              <span className="text-slate-500">Precipitación hipotética del escenario (referencia IMERG):</span>{' '}
               <strong className="text-cyan-400 font-mono">{targetInfo.imergContext.rateMmH} mm/h</strong>{' '}
               ({targetInfo.imergContext.accumulated24hMm} mm acum. 24h)
             </div>
             <div>
-              <span className="text-slate-500">Fecha del dato IMERG:</span>{' '}
+              <span className="text-slate-500">Fecha ficticia del escenario:</span>{' '}
               <span className="font-mono">{targetInfo.imergContext.referenceDateUtc}</span>
             </div>
           </div>
@@ -151,8 +151,8 @@ export const FinalMissionReport: React.FC<FinalMissionReportProps> = ({
             </div>
             <p className="text-slate-300 text-[11px] leading-relaxed pt-1">
               {effectiveFinding === 'insufficient'
-                ? '«Se observó precipitación elevada en el producto satelital consultado. La imagen disponible presenta limitaciones severas por nubosidad. No es posible confirmar extensión de inundación con la evidencia actual. Se recomienda obtener observaciones complementarias y validar con información de campo».'
-                : '«Se identificó ensanchamiento en el espejo de agua sobre zonas agrícolas/urbanas adyacentes al río. Los datos ópticos sugieren vulnerabilidad local, sujeta a confirmación en terreno».'}
+                ? '«El escenario simula precipitación elevada. La imagen óptica simulada presenta limitaciones severas por nubosidad. No es posible confirmar extensión de inundación con esta evidencia. Se recomienda obtener observaciones complementarias y validar con información de campo».'
+                : '«La imagen simulada muestra posible ensanchamiento del espejo de agua junto al río. Una evaluación real requeriría imágenes verificadas y confirmación en terreno».'}
             </p>
           </div>
 

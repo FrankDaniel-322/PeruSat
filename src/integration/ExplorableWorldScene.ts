@@ -127,6 +127,9 @@ export class ExplorableWorldScene extends Scene {
     this.createPlayer();
 
     // 4. Cámara suave siguiendo al jugador (estilo Among Us)
+    // Cada sala mide exactamente lo mismo que el viewport; limitar el scroll evita
+    // que el seguimiento saque el fondo y las consolas fuera del lienzo.
+    this.cameras.main.setBounds(0, 0, 320, 180);
     this.cameras.main.startFollow(this.playerContainer!, true, 0.08, 0.08);
 
     // 5. Crear el prompt interactivo flotante [E]

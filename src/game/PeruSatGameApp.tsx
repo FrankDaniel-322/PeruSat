@@ -326,7 +326,7 @@ export const PeruSatGameApp: React.FC = () => {
                   : 'bg-rose-500'
               }`}
             />
-            <span>{connectionNames[connectionState]}</span>
+            <span>{!isMultiplayer && connectionState === 'connected' ? 'Simulación lista' : connectionNames[connectionState]}</span>
           </div>
         </div>
       </header>
@@ -375,7 +375,7 @@ export const PeruSatGameApp: React.FC = () => {
                       : 'bg-rose-400'
                   }`}
                 />
-                <span>Estado: {connectionNames[connectionState]}</span>
+                <span>Estado: {!isMultiplayer && connectionState === 'connected' ? 'Simulación lista' : connectionNames[connectionState]}</span>
               </div>
               {storeError && (
                 <div className="p-3 bg-rose-950/80 border border-rose-800 text-rose-300 text-xs rounded-xl font-mono text-left space-y-2">
@@ -429,9 +429,9 @@ export const PeruSatGameApp: React.FC = () => {
               </div>
 
               <div className="space-y-3 bg-slate-950 p-4 rounded-xl border border-slate-800">
-                <h3 className="font-bold text-amber-400 text-sm">Datos NASA GPM/IMERG V07</h3>
+                <h3 className="font-bold text-amber-400 text-sm">Escenario simulado · referencia NASA GPM/IMERG V07</h3>
                 <p className="leading-relaxed">
-                  Producto de precipitación satelital de referencia: tasa estimada de <strong>42.5 mm/h</strong> sobre el norte peruano.
+                  Tasa hipotética del ejercicio: <strong>42.5 mm/h</strong> sobre el norte peruano. No es una medición NASA de una fecha real.
                 </p>
                 <div className="p-2.5 rounded bg-amber-950/30 border border-amber-900/50 text-[11px] text-amber-200">
                   ⚠️ <strong>Aviso Ético:</strong> La estimación de lluvia satelital no certifica inundación en tierra. La imagen óptica y el reporte en terreno son indispensables para corroborar.

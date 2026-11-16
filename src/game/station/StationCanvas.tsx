@@ -927,7 +927,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                             </div>
                           </div>
                           <div className="text-[9.5px] font-mono text-slate-400">
-                            Precipitación acumulada estimada por NASA GPM/IMERG: &gt;120 mm en 24h.
+                            Precipitación hipotética del ejercicio (referencia IMERG): &gt;120 mm en 24h.
                           </div>
                         </div>
                       </div>
@@ -1596,7 +1596,7 @@ export const StationCanvas: React.FC<StationCanvasProps> = ({
                     </div>
                     <p className="text-[11px] text-slate-300 leading-relaxed">
                       El calentamiento anómalo del mar frente a la costa norte peruana genera frentes convectivos de alta intensidad.
-                      La constelación multisatélite NASA GPM / IMERG V07 detecta tasas de precipitación superiores a 40 mm/h.
+                      En este escenario hipotético se representan tasas superiores a 40 mm/h, inspiradas en el producto NASA GPM / IMERG V07.
                       Esta información orienta la prioridad espacial pero requiere verificación óptica submétrica de PerúSAT-1.
                     </p>
                   </div>

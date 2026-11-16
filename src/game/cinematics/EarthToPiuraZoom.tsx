@@ -23,7 +23,7 @@ const STAGES: StageMeta[] = [
     title: '1. ÓRBITA GLOBAL LEO',
     subtitle: 'PerúSAT-1 en Órbita Heliosincrónica (SSO)',
     scaleLabel: 'Altitud: 673 km · Inclinación: 98.2°',
-    telemetry: 'VELOCIDAD: 7.5 km/s · PERIODO: 98 min · REPOSITORIO: CONIDA / NASA GPM',
+    telemetry: 'VELOCIDAD: 7.5 km/s · PERIODO: 98 min · REFERENCIAS: CONIDA / NASA GPM',
     description: 'Vigilancia remota del Pacífico oriental. Se detectan anomalías de temperatura superficial marina (TSM) asociadas al fenómeno de El Niño.',
   },
   {
@@ -47,7 +47,7 @@ const STAGES: StageMeta[] = [
     title: '4. DEPARTAMENTO DE PIURA',
     subtitle: 'Costa Norte · Zona de Alto Riesgo de Inundación',
     scaleLabel: 'Área Departamental: 35,892 km²',
-    telemetry: 'PRECIPITACIÓN ACUMULADA: >120 mm/24h · ALERTA ROJA INDECI',
+    telemetry: 'ESCENARIO SIMULADO: >120 mm/24h · ALERTA FICTICIA',
     description: 'La cuenca baja del río Piura y los campos agrícolas del valle del Chira registran riesgo inminente de anegamiento.',
   },
   {
@@ -55,7 +55,7 @@ const STAGES: StageMeta[] = [
     title: '5. CUENCA HIDROGRÁFICA PIURA - CHIRA',
     subtitle: 'Intersección Fluvial y Zonas Pobladas',
     scaleLabel: 'Resolución Cartográfica: 1:50,000',
-    telemetry: 'CAUDAL RÍO PIURA: >1,900 m³/s · CAUDAL CHIRA: >2,200 m³/s',
+    telemetry: 'CAUDALES HIPOTÉTICOS · RÍO PIURA: >1,900 m³/s · CHIRA: >2,200 m³/s',
     description: 'Sectores críticos identificados: Puente Sánchez Cerro, Tambogrande, Catacaos y terrazas de cultivo en Chira.',
   },
   {
